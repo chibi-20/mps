@@ -12,7 +12,7 @@ if (session_status() === PHP_SESSION_NONE) {
 function require_login(string $required_role = ''): array
 {
     if (empty($_SESSION['user_id'])) {
-        header('Location: /mps/index.php');
+        header('Location: ' . BASE_URL . 'index.php');
         exit;
     }
     if ($required_role !== '' && $_SESSION['role'] !== $required_role) {

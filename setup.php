@@ -208,7 +208,7 @@ try {
     echo '<ul style="font-family:sans-serif">';
     echo '<li>Admin login: <code>admin</code> / <code>admin123</code></li>';
     echo '<li>Teacher login: <code>jmcanturia</code> / <code>teacher123</code></li>';
-    echo '<li><a href="/mps/index.php">Go to Login</a></li>';
+    echo '<li><a href="' . BASE_URL . 'index.php">Go to Login</a></li>';
     echo '</ul>';
 
 } catch (Throwable $e) {

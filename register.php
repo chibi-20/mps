@@ -4,7 +4,7 @@ require_once __DIR__ . '/includes/functions.php';
 
 // Already logged in → redirect
 if (!empty($_SESSION['user_id'])) {
-    header('Location: /mps/' . ($_SESSION['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php'));
+    header('Location: ' . BASE_URL . ($_SESSION['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php'));
     exit;
 }
 
@@ -98,7 +98,7 @@ $csrf = csrf_token();
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MPS System – Teacher Registration</title>
-<link rel="stylesheet" href="/mps/styles.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
 </head>
 <body class="auth-page">
 <div class="auth-card auth-card--wide">
@@ -116,7 +116,7 @@ $csrf = csrf_token();
         <strong>Registration submitted!</strong> Your account is <em>pending admin approval</em>.
         You will be able to log in once an administrator activates your account.
     </div>
-    <p class="auth-footer"><a href="/mps/index.php">&larr; Back to Login</a></p>
+    <p class="auth-footer"><a href="<?= BASE_URL ?>index.php">&larr; Back to Login</a></p>
 
     <?php else: ?>
 
@@ -205,7 +205,7 @@ $csrf = csrf_token();
 
         <button type="submit" class="btn btn-primary btn-full">Submit Registration</button>
     </form>
-    <p class="auth-footer"><a href="/mps/index.php">&larr; Back to Login</a></p>
+    <p class="auth-footer"><a href="<?= BASE_URL ?>index.php">&larr; Back to Login</a></p>
     <?php endif; ?>
 </div>
 </body>

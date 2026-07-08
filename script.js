@@ -31,7 +31,7 @@ function fmtNum(n, decimals = 2) {
 }
 
 async function apiPost(url, payload) {
-    const res = await fetch(url, {
+    const res = await fetch(BASE_URL + url, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -43,7 +43,7 @@ async function apiPost(url, payload) {
 }
 
 async function apiGet(url) {
-    const res = await fetch(url);
+    const res = await fetch(BASE_URL + url);
     return res.json();
 }
 
@@ -96,7 +96,7 @@ async function loadSectionChecklist(subjectId) {
     container.innerHTML = '<p class="text-muted" style="margin:0">Loading sections…</p>';
     if (hint) hint.textContent = '';
 
-    const data = await apiGet(`/mps/api/get_sections.php?subject_id=${encodeURIComponent(subjectId)}`);
+    const data = await apiGet(`api/get_sections.php?subject_id=${encodeURIComponent(subjectId)}`);
 
     if (data.error) {
         container.innerHTML = `<p class="alert alert-warning" style="margin:0">${data.error}</p>`;
@@ -163,7 +163,7 @@ if (frmNew) {
             return;
         }
 
-        const result = await apiPost('/mps/api/create_assessment.php', payload);
+        const result = await apiPost('api/create_assessment.php', payload);
         if (result.error) { showToast(result.error, 'error'); return; }
         showToast('Assessment created!');
         setTimeout(() => location.reload(), 800);
@@ -174,7 +174,7 @@ async function deleteAssessment(id, title, event) {
     event.stopPropagation();
     if (!confirm(`Delete "${title}" and all its encoded data?\n\nThis cannot be undone.`)) return;
 
-    const result = await apiPost('/mps/api/delete_assessment.php', { assessment_id: id });
+    const result = await apiPost('api/delete_assessment.php', { assessment_id: id });
     if (result.error) { showToast(result.error, 'error'); return; }
 
     // Remove the card from the sidebar
@@ -205,7 +205,7 @@ async function loadAssessment(id) {
     document.getElementById('mpsTable').innerHTML = '<tr><td>Loading…</td></tr>';
     document.getElementById('itemTable').innerHTML = '<tr><td>Loading…</td></tr>';
 
-    const data = await apiGet(`/mps/api/get_assessment_data.php?id=${id}`);
+    const data = await apiGet(`api/get_assessment_data.php?id=${id}`);
     if (data.error) { showToast(data.error, 'error'); return; }
 
     currentAssessment = data;
@@ -234,7 +234,7 @@ async function loadAssessment(id) {
     chip.className = 'status-chip status-' + a.status;
 
     // Export link
-    document.getElementById('btnExport').href = `/mps/api/export_excel.php?assessment_id=${id}`;
+    document.getElementById('btnExport').href = `${BASE_URL}api/export_excel.php?assessment_id=${id}`;
 
     // Remarks (returned)
     const ra = document.getElementById('returnedAlert');
@@ -720,7 +720,7 @@ async function saveData(action) {
         });
     });
 
-    const result = await apiPost('/mps/api/save_assessment.php', {
+    const result = await apiPost('api/save_assessment.php', {
         assessment_id: id,
         action,
         score_frequencies: scoreData,
@@ -750,7 +750,7 @@ async function refreshDashboard() {
         section:    document.getElementById('f_section')?.value    || '',
         assessment: document.getElementById('f_assessment')?.value || '',
     });
-    const data = await apiGet(`/mps/api/get_dashboard_data.php?${params}`);
+    const data = await apiGet(`api/get_dashboard_data.php?${params}`);
     if (!data || data.error) { showToast('Failed to load dashboard data.', 'error'); return; }
 
     renderKpis(data.kpis);
@@ -916,7 +916,7 @@ function renderHeatmap(heatmap) {
 
 // ---- SUBMISSIONS ----
 async function loadSubmissions() {
-    const data = await apiGet('/mps/api/get_submissions.php');
+    const data = await apiGet('api/get_submissions.php');
     if (!data || data.error) return;
     const tbody = document.getElementById('complianceTbody');
     if (!tbody) return;
@@ -940,7 +940,7 @@ async function loadSubmissions() {
 
 async function approveAssessment(id) {
     if (!confirm('Approve this assessment?')) return;
-    const r = await apiPost('/mps/api/approve_assessment.php', { assessment_id: id, action: 'approve' });
+    const r = await apiPost('api/approve_assessment.php', { assessment_id: id, action: 'approve' });
     if (r.error) { showToast(r.error,'error'); return; }
     showToast('Assessment approved.');
     loadSubmissions();
@@ -960,7 +960,7 @@ if (frmReturn) {
     frmReturn.addEventListener('submit', async (e) => {
         e.preventDefault();
         const fd = new FormData(frmReturn);
-        const r  = await apiPost('/mps/api/approve_assessment.php', {
+        const r  = await apiPost('api/approve_assessment.php', {
             assessment_id: fd.get('assessment_id'),
             action: 'return',
             remarks: fd.get('remarks'),
@@ -974,7 +974,7 @@ if (frmReturn) {
 
 // ---- TEACHER ACCOUNTS ----
 async function loadTeachers() {
-    const data = await apiGet('/mps/api/get_teachers.php');
+    const data = await apiGet('api/get_teachers.php');
     if (!data) return;
     renderTeacherTable('pendingTbody', data.pending, true);
     renderTeacherTable('activeTbody',  data.active,  false);
@@ -1006,7 +1006,7 @@ function renderTeacherTable(tbodyId, rows, isPending) {
 
 async function manageTeacher(id, action) {
     if (!confirm(`${action === 'approve' ? 'Approve' : 'Deactivate'} this teacher?`)) return;
-    const r = await apiPost('/mps/api/manage_teacher.php', { teacher_id: id, action });
+    const r = await apiPost('api/manage_teacher.php', { teacher_id: id, action });
     if (r.error) { showToast(r.error,'error'); return; }
     showToast(action === 'approve' ? 'Teacher approved.' : 'Teacher deactivated.');
     loadTeachers();
@@ -1029,7 +1029,7 @@ function adminTab(btn, panel) {
 async function initAssignmentsPanel() {
     const sel = document.getElementById('assignTeacher');
     if (!sel || sel.options.length > 1) return; // already populated
-    const data = await apiGet('/mps/api/get_teachers.php');
+    const data = await apiGet('api/get_teachers.php');
     if (!data?.active) return;
     data.active.forEach(t => {
         const opt = document.createElement('option');
@@ -1048,7 +1048,7 @@ async function adminLoadTeacherSubjects(teacherId) {
 
     if (!teacherId) return;
 
-    const data = await apiGet(`/mps/api/get_teacher_subjects.php?teacher_id=${encodeURIComponent(teacherId)}`);
+    const data = await apiGet(`api/get_teacher_subjects.php?teacher_id=${encodeURIComponent(teacherId)}`);
     if (data.error || !data.subjects?.length) {
         subjSel.innerHTML = '<option value="">No subjects registered</option>';
         return;
@@ -1077,7 +1077,7 @@ async function adminLoadAssignmentSections() {
     wrap.style.display  = 'block';
 
     const data = await apiGet(
-        `/mps/api/get_assignment_sections.php?teacher_id=${encodeURIComponent(teacherId)}&subject_id=${encodeURIComponent(subjectId)}`
+        `api/get_assignment_sections.php?teacher_id=${encodeURIComponent(teacherId)}&subject_id=${encodeURIComponent(subjectId)}`
     );
 
     if (data.error) {
@@ -1117,7 +1117,7 @@ async function adminSaveAssignments() {
     const section_ids = [...document.querySelectorAll('#assignSectionChecklist input:checked')]
         .map(cb => +cb.value);
 
-    const result = await apiPost('/mps/api/assign_sections.php', { teacher_id: +teacherId, subject_id: +subjectId, section_ids });
+    const result = await apiPost('api/assign_sections.php', { teacher_id: +teacherId, subject_id: +subjectId, section_ids });
     if (result.error) {
         if (msg) { msg.textContent = result.error; msg.style.color = 'var(--error, #c0392b)'; }
         showToast(result.error, 'error');
@@ -1140,7 +1140,7 @@ async function updateFilterDependents() {
     const grade   = document.getElementById('f_grade')?.value || '';
     const subject = document.getElementById('f_subject')?.value || '';
     const params  = new URLSearchParams({ sy, grade, subject });
-    const data    = await apiGet(`/mps/api/get_filter_options.php?${params}`);
+    const data    = await apiGet(`api/get_filter_options.php?${params}`);
     if (!data) return;
 
     const secSel  = document.getElementById('f_section');

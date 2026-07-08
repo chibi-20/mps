@@ -45,3 +45,11 @@ define('AVAILABLE_SUBJECTS', [
 ]);
 
 define('AVAILABLE_GRADE_LEVELS', [7, 8, 9, 10]);
+
+// ============================================================
+// URL base — set once per deployment environment.
+// '/'     when the app lives at the domain root (e.g. https://school.edu/)
+// '/mps/' when it lives in a subfolder  (e.g. http://localhost/mps/)
+// Trailing slash is required.
+// ============================================================
+define('BASE_URL', '/');

@@ -69,7 +69,7 @@ $csrf = csrf_token();
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher Dashboard – MPS System</title>
-<link rel="stylesheet" href="/mps/styles.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -85,7 +85,7 @@ $csrf = csrf_token();
     <div class="topnav-user">
         <span class="user-chip teacher-chip">Teacher</span>
         <span><?= h($sess['display']) ?></span>
-        <a href="/mps/api/logout.php" class="btn btn-sm btn-outline">Sign Out</a>
+        <a href="<?= BASE_URL ?>api/logout.php" class="btn btn-sm btn-outline">Sign Out</a>
     </div>
 </nav>
 
@@ -274,6 +274,7 @@ $csrf = csrf_token();
 
 <!-- Data passed to JS -->
 <script>
+const BASE_URL           = <?= json_encode(BASE_URL) ?>;
 const CSRF_TOKEN         = <?= json_encode($csrf) ?>;
 const MASTERY_THRESHOLD  = <?= MASTERY_THRESHOLD ?>;
 const MASTERY_BANDS      = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], MASTERY_BANDS)) ?>;
@@ -282,6 +283,6 @@ const AVAILABLE_SECTIONS = {}; // populated per assessment
 let currentAssessmentId  = null;
 let miniChart            = null;
 </script>
-<script src="/mps/script.js"></script>
+<script src="<?= BASE_URL ?>script.js"></script>
 </body>
 </html>

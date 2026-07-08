@@ -4,7 +4,7 @@ require_once __DIR__ . '/includes/functions.php';
 
 // Already logged in → redirect
 if (!empty($_SESSION['user_id'])) {
-    header('Location: /mps/' . ($_SESSION['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php'));
+    header('Location: ' . BASE_URL . ($_SESSION['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php'));
     exit;
 }
 
@@ -38,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['last_name'] = $user['last_name'];
 
             $redirect = $user['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php';
-            header('Location: /mps/' . $redirect);
+            header('Location: ' . BASE_URL . $redirect);
             exit;
         }
     }
@@ -52,7 +52,7 @@ $csrf = csrf_token();
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MPS System – Login</title>
-<link rel="stylesheet" href="/mps/styles.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
 </head>
 <body class="auth-page">
 <div class="auth-card">
@@ -85,7 +85,7 @@ $csrf = csrf_token();
         <button type="submit" class="btn btn-primary btn-full">Sign In</button>
     </form>
     <p class="auth-footer">
-        New teacher? <a href="/mps/register.php">Create an account</a>
+        New teacher? <a href="<?= BASE_URL ?>register.php">Create an account</a>
     </p>
 </div>
 </body>

@@ -28,7 +28,7 @@ $gradeLevels = [9, 10];  // grades with sections
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Dashboard – MPS System</title>
-<link rel="stylesheet" href="/mps/styles.css">
+<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -41,7 +41,7 @@ $gradeLevels = [9, 10];  // grades with sections
     <div class="topnav-user">
         <span class="user-chip admin-chip">Admin</span>
         <span><?= h($sess['display']) ?></span>
-        <a href="/mps/api/logout.php" class="btn btn-sm btn-outline">Sign Out</a>
+        <a href="<?= BASE_URL ?>api/logout.php" class="btn btn-sm btn-outline">Sign Out</a>
     </div>
 </nav>
 
@@ -268,6 +268,7 @@ $gradeLevels = [9, 10];  // grades with sections
 </div>
 
 <script>
+const BASE_URL        = <?= json_encode(BASE_URL) ?>;
 const CSRF_TOKEN      = <?= json_encode($csrf) ?>;
 const MASTERY_BANDS   = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], MASTERY_BANDS)) ?>;
 const BAND_KEYS       = <?= json_encode(array_keys(MASTERY_BANDS)) ?>;
@@ -276,6 +277,6 @@ const BAND_COLORS     = {
     AVR:'#ffd166', LM:'#ef8c44', VLM:'#e55934', ANM:'#9d0208'
 };
 </script>
-<script src="/mps/script.js"></script>
+<script src="<?= BASE_URL ?>script.js"></script>
 </body>
 </html>
