@@ -52,4 +52,4 @@ define('AVAILABLE_GRADE_LEVELS', [7, 8, 9, 10]);
 // '/mps/' when it lives in a subfolder  (e.g. http://localhost/mps/)
 // Trailing slash is required.
 // ============================================================
-define('BASE_URL', '/');
+define('BASE_URL', '/mps/');
