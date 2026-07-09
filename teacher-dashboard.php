@@ -225,6 +225,7 @@ $csrf = csrf_token();
                 <span id="detailStatus" class="status-chip"></span>
                 <button id="btnSaveDraft" class="btn btn-outline" onclick="saveData('draft')">Save Draft</button>
                 <button id="btnSubmit" class="btn btn-primary" onclick="saveData('submit')">Submit</button>
+                <button id="btnImportZipgrade" class="btn btn-outline" onclick="openImportModal()">&#x2B06; Import ZipGrade</button>
                 <a id="btnExport" href="#" target="_blank" class="btn btn-outline">Export Excel</a>
             </div>
         </div>
@@ -271,6 +272,45 @@ $csrf = csrf_token();
 
 </main>
 </div><!-- /.app-layout -->
+
+<!-- ============================================================
+     ZIPGRADE IMPORT MODAL
+============================================================ -->
+<div id="importModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeImportModal()">
+    <div class="modal-box modal-box--wide">
+        <h3>Import ZipGrade CSV</h3>
+        <p class="text-muted" style="margin-bottom:1rem;font-size:.88rem">
+            Upload a ZipGrade CSV export for <strong>one section</strong>.
+            Preview runs first — no data is written until you confirm.
+        </p>
+
+        <form id="frmImport">
+            <input type="hidden" name="assessment_id" id="importAsmtId">
+            <div class="form-row" style="gap:1rem;margin-bottom:1rem">
+                <div class="form-group" style="margin:0;flex:1">
+                    <label>Section <span class="req">*</span></label>
+                    <select name="section_id" id="importSection" required>
+                        <option value="">— select section —</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin:0;flex:2">
+                    <label>ZipGrade CSV File <span class="req">*</span></label>
+                    <input type="file" name="csv_file" id="importFile" accept=".csv" required
+                           style="padding:.35rem .5rem">
+                </div>
+            </div>
+        </form>
+
+        <!-- Preview results area (shown after clicking Preview) -->
+        <div id="importPreviewArea" style="display:none"></div>
+
+        <div class="form-actions" style="margin-top:1.25rem">
+            <button id="btnDoPreview"  class="btn btn-primary"  onclick="doImportPreview()">Preview</button>
+            <button id="btnDoConfirm" class="btn btn-success"  onclick="doImportConfirm()" style="display:none">Confirm Import</button>
+            <button class="btn btn-outline" onclick="closeImportModal()">Cancel</button>
+        </div>
+    </div>
+</div>
 
 <!-- Data passed to JS -->
 <script>

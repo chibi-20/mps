@@ -193,6 +193,164 @@ async function deleteAssessment(id, title, event) {
     showToast('Draft deleted.');
 }
 
+// ============================================================
+// ZIPGRADE CSV IMPORT
+// ============================================================
+
+function openImportModal() {
+    if (!currentAssessment) return;
+    const { sections } = currentAssessment;
+
+    // Populate section dropdown from the currently loaded assessment
+    const sel = document.getElementById('importSection');
+    sel.innerHTML = '<option value="">— select section —</option>';
+    sections.forEach(sec => {
+        const opt = document.createElement('option');
+        opt.value       = sec.id;
+        opt.textContent = sec.name;
+        sel.appendChild(opt);
+    });
+    if (sections.length === 1) sel.value = sections[0].id;
+
+    document.getElementById('importAsmtId').value           = currentAssessmentId;
+    document.getElementById('importFile').value             = '';
+    document.getElementById('importPreviewArea').style.display = 'none';
+    document.getElementById('importPreviewArea').innerHTML  = '';
+    document.getElementById('btnDoPreview').disabled        = false;
+    document.getElementById('btnDoPreview').textContent     = 'Preview';
+    document.getElementById('btnDoConfirm').style.display   = 'none';
+
+    document.getElementById('importModal').style.display = 'flex';
+}
+
+function closeImportModal() {
+    document.getElementById('importModal').style.display = 'none';
+}
+
+async function doImportPreview() {
+    const form = document.getElementById('frmImport');
+    if (!form.reportValidity()) return;
+
+    const fd = new FormData(form);
+    fd.set('action', 'preview');
+    fd.set('csrf_token', CSRF_TOKEN);
+
+    const btn = document.getElementById('btnDoPreview');
+    btn.disabled    = true;
+    btn.textContent = 'Analyzing…';
+
+    let data;
+    try {
+        const res = await fetch(BASE_URL + 'api/import_zipgrade.php', { method: 'POST', body: fd });
+        data = await res.json();
+    } catch {
+        showToast('Network error — could not reach the server.', 'error');
+        btn.disabled = false; btn.textContent = 'Preview';
+        return;
+    }
+
+    btn.disabled = false; btn.textContent = 'Preview';
+
+    if (data.error) { showToast(data.error, 'error'); return; }
+    renderImportPreview(data.preview);
+}
+
+function renderImportPreview(p) {
+    const area = document.getElementById('importPreviewArea');
+
+    // Item count mismatch warning
+    const warnHtml = p.item_count_warning
+        ? `<div class="alert alert-warning" style="margin-bottom:.75rem;font-size:.84rem">${escHtml(p.item_count_warning)}</div>`
+        : '';
+
+    // Stat tiles
+    const mpsCls = p.mps >= 75 ? 'stat-green' : p.mps >= 50 ? 'stat-yellow' : 'stat-red';
+    const flgCls = p.flagged_rows > 0 ? 'stat-yellow' : 'stat-green';
+    const statsHtml = `
+        <div class="import-stats">
+            <div class="import-stat">
+                <span class="stat-val">${p.total_students}</span>
+                <span class="stat-lbl">Students</span>
+            </div>
+            <div class="import-stat">
+                <span class="stat-val">${p.min_score}–${p.max_score}</span>
+                <span class="stat-lbl">Score Range</span>
+            </div>
+            <div class="import-stat">
+                <span class="stat-val">${p.mean_score}</span>
+                <span class="stat-lbl">Mean Score</span>
+            </div>
+            <div class="import-stat ${mpsCls}">
+                <span class="stat-val">${p.mps}%</span>
+                <span class="stat-lbl">MPS</span>
+            </div>
+            <div class="import-stat ${flgCls}">
+                <span class="stat-val">${p.flagged_rows > 0 ? p.flagged_rows + ' ⚠' : '✓ 0'}</span>
+                <span class="stat-lbl">Flagged</span>
+            </div>
+            ${p.skipped_rows > 0 ? `<div class="import-stat"><span class="stat-val">${p.skipped_rows}</span><span class="stat-lbl">Skipped (blank)</span></div>` : ''}
+        </div>`;
+
+    // Flagged row details table
+    let flaggedHtml = '';
+    if (p.flagged_rows > 0) {
+        const rows = p.flagged_details.map(r =>
+            `<tr><td>Line ${r.line}</td><td>${r.score}</td><td>${escHtml(r.flags.join('; '))}</td></tr>`
+        ).join('');
+        flaggedHtml = `
+            <div class="import-flagged">
+                <strong>⚠ ${p.flagged_rows} flagged row(s) — included in import</strong>
+                <div class="table-scroll" style="max-height:130px;margin-top:.4rem">
+                    <table class="data-table" style="font-size:.8rem">
+                        <thead><tr><th>CSV Line</th><th>Score</th><th>Issue</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </div>`;
+    }
+
+    area.innerHTML = warnHtml + statsHtml + flaggedHtml +
+        `<p class="import-confirm-hint">
+            Review the stats above. Click <strong>Confirm Import</strong> to write this data
+            to the selected section — existing data for that section will be replaced.
+        </p>`;
+
+    area.style.display = 'block';
+    document.getElementById('btnDoConfirm').style.display = '';
+}
+
+async function doImportConfirm() {
+    const form = document.getElementById('frmImport');
+    if (!form.reportValidity()) return;
+
+    const fd = new FormData(form);
+    fd.set('action', 'confirm');
+    fd.set('csrf_token', CSRF_TOKEN);
+
+    const btn = document.getElementById('btnDoConfirm');
+    btn.disabled    = true;
+    btn.textContent = 'Importing…';
+
+    let data;
+    try {
+        const res = await fetch(BASE_URL + 'api/import_zipgrade.php', { method: 'POST', body: fd });
+        data = await res.json();
+    } catch {
+        showToast('Network error during import.', 'error');
+        btn.disabled = false; btn.textContent = 'Confirm Import';
+        return;
+    }
+
+    btn.disabled = false; btn.textContent = 'Confirm Import';
+
+    if (data.error) { showToast(data.error, 'error'); return; }
+
+    closeImportModal();
+    const flagNote = data.flagged > 0 ? ` (${data.flagged} row(s) flagged)` : '';
+    showToast(`Imported ${data.students} student${data.students !== 1 ? 's' : ''}. MPS: ${data.mps}%${flagNote}`);
+    loadAssessment(currentAssessmentId);   // reload grids with fresh DB data
+}
+
 async function loadAssessment(id) {
     // Mark active in sidebar
     document.querySelectorAll('.assessment-item').forEach(el => {
@@ -247,6 +405,8 @@ async function loadAssessment(id) {
     const locked = (a.status === 'submitted' || a.status === 'approved');
     document.getElementById('btnSaveDraft').disabled = locked;
     document.getElementById('btnSubmit').disabled    = locked;
+    const btnImport = document.getElementById('btnImportZipgrade');
+    if (btnImport) btnImport.style.display = locked ? 'none' : '';
 
     buildMpsTable(data);
     buildItemTable(data);
