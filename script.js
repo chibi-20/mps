@@ -7,6 +7,12 @@
 'use strict';
 
 // ============================================================
+// Brand palette (Chart.js needs literal color strings — single
+// source of truth here instead of hex scattered per chart)
+// ============================================================
+const THEME = { maroon: '#6E1423', maroonDark: '#4A0E18', gold: '#C79A3A', goldLight: '#E6C767' };
+
+// ============================================================
 // Shared helpers
 // ============================================================
 
@@ -847,7 +853,7 @@ function buildMiniChart(data) {
                     grid: { color: '#e0e7ef' },
                 },
             },
-            annotation: { annotations: [{ type:'line', yMin:75, yMax:75, borderColor:'#f4a226', borderWidth:2 }] },
+            annotation: { annotations: [{ type:'line', yMin:75, yMax:75, borderColor: THEME.gold, borderWidth:2 }] },
         },
     });
 }
@@ -961,7 +967,7 @@ function buildMpsSectionChart(data) {
             plugins: {
                 legend: { display: false },
                 annotation: {
-                    annotations: { line75: { type:'line', yMin:75, yMax:75, borderColor:'#f4a226', borderWidth:2, label:{content:'Target 75%', display:true} } }
+                    annotations: { line75: { type:'line', yMin:75, yMax:75, borderColor: THEME.gold, borderWidth:2, label:{content:'Target 75%', display:true} } }
                 },
             },
             scales: { y: { min:0, max:100 } },
@@ -975,7 +981,7 @@ function buildMpsSubjectChart(data) {
         type: 'bar',
         data: {
             labels: d.map(r => r.subject_name + ' G' + r.grade_level),
-            datasets: [{ label: 'MPS %', data: d.map(r => +r.mps), backgroundColor: '#1d6fa3' }],
+            datasets: [{ label: 'MPS %', data: d.map(r => +r.mps), backgroundColor: THEME.maroon }],
         },
         options: { scales: { y: { min:0, max:100 } } },
     };
@@ -1010,7 +1016,7 @@ function buildNpwrmChart(data) {
             datasets: [{
                 label: 'NPWRM',
                 data:  d.map(r => +r.npwrm),
-                backgroundColor: '#1d6fa3',
+                backgroundColor: THEME.maroon,
             }],
         },
         options: { scales: { y: { beginAtZero: true } } },
@@ -1042,7 +1048,7 @@ function buildMpsTrendChart(data) {
             datasets: [{
                 label: 'Overall MPS %',
                 data:  d.map(r => +r.mps),
-                borderColor: '#1d6fa3', fill: false, tension: 0.3,
+                borderColor: THEME.maroon, fill: false, tension: 0.3,
             }],
         },
         options: { scales: { y: { min:0, max:100 } } },

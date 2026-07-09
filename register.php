@@ -98,18 +98,24 @@ $csrf = csrf_token();
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MPS System – Teacher Registration</title>
+<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
 <link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
 </head>
 <body class="auth-page">
-<div class="auth-card auth-card--wide">
-    <div class="auth-logo">
-        <div class="school-badge">JZG</div>
-        <div>
-            <p class="auth-school-name">Jacobo Z. Gonzales Memorial National High School</p>
-            <p class="auth-division">Schools Division of Biñan City · Region IV-A CALABARZON</p>
-        </div>
+<div class="login-split">
+
+    <div class="login-brand">
+        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
+        <p class="login-brand-name">Jacobo Z. Gonzales Memorial National High School</p>
+        <p class="login-brand-division">Schools Division of Biñan City &middot; Region IV-A CALABARZON</p>
+        <hr class="login-brand-divider">
+        <p class="login-brand-tagline">MPS &amp; Item Analysis System</p>
     </div>
-    <h2 class="auth-title">Teacher Self-Registration</h2>
+
+    <div class="login-form-panel">
+        <div class="login-card login-card--wide">
+            <h2 class="login-card-title">Teacher Self-Registration</h2>
+            <p class="login-card-subtitle">Create your teacher account — pending admin approval after signup.</p>
 
     <?php if ($success): ?>
     <div class="alert alert-success">
@@ -207,6 +213,9 @@ $csrf = csrf_token();
     </form>
     <p class="auth-footer"><a href="<?= BASE_URL ?>index.php">&larr; Back to Login</a></p>
     <?php endif; ?>
+        </div>
+    </div>
+
 </div>
 </body>
 </html>

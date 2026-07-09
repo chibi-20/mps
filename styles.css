@@ -4,23 +4,36 @@
 
 /* ---- CSS Variables ---- */
 :root {
-    --c-primary:    #1d6fa3;
-    --c-primary-d:  #155a86;
-    --c-accent:     #f4a226;
+    /* Brand palette — Jacobo Z. Gonzales Memorial NHS */
+    --maroon:       #6E1423;
+    --maroon-dark:  #4A0E18;
+    --gold:         #C79A3A;
+    --gold-light:   #E6C767;
+    --black:        #1A1A1A;
+    --white:        #FFFFFF;
+    --gray-bg:      #F5F3EF;
+    --gold-tint:        rgba(199,154,58,.10);
+    --gold-tint-strong: rgba(199,154,58,.20);
+    --maroon-tint:      rgba(110,20,35,.06);
+
+    /* UI chrome — mapped to brand palette */
+    --c-primary:    var(--maroon);
+    --c-primary-d:  var(--maroon-dark);
+    --c-accent:     var(--gold);
     --c-success:    #2d6a4f;
     --c-warning:    #e07b00;
     --c-danger:     #c0392b;
-    --c-bg:         #f0f4f8;
-    --c-surface:    #ffffff;
-    --c-border:     #d1dce9;
-    --c-text:       #1a2533;
-    --c-muted:      #5e7080;
+    --c-bg:         var(--gray-bg);
+    --c-surface:    var(--white);
+    --c-border:     #e3ddd0;
+    --c-text:       var(--black);
+    --c-muted:      #6b6459;
     --c-green:      #2d9148;
     --c-yellow:     #c98700;
     --c-red:        #c0392b;
-    --radius:       8px;
-    --shadow:       0 1px 4px rgba(0,0,0,.12);
-    --nav-h:        56px;
+    --radius:       10px;
+    --shadow:       0 2px 10px rgba(26,26,26,.08);
+    --nav-h:        60px;
 }
 
 /* ---- Reset ---- */
@@ -32,8 +45,8 @@ body {
     color: var(--c-text);
     line-height: 1.5;
 }
-a { color: var(--c-primary); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a { color: var(--maroon); text-decoration: none; }
+a:hover { color: var(--gold); text-decoration: underline; }
 ul { padding-left: 1.2em; }
 
 /* ---- Topnav ---- */
@@ -42,20 +55,18 @@ ul { padding-left: 1.2em; }
     display: flex; align-items: center; justify-content: space-between;
     padding: 0 1.5rem;
     height: var(--nav-h);
-    background: var(--c-primary);
+    background: linear-gradient(90deg, var(--maroon) 0%, var(--maroon-dark) 100%);
     color: #fff;
+    border-bottom: 3px solid var(--gold);
     box-shadow: 0 2px 6px rgba(0,0,0,.2);
 }
 .topnav-brand { display: flex; align-items: center; gap: .75rem; }
-.topnav-logo {
-    background: var(--c-accent); color: #fff;
-    font-weight: 700; font-size: .9rem;
-    width: 36px; height: 36px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-}
-.topnav-title { font-weight: 600; font-size: 1rem; }
+.topnav-title { font-weight: 600; font-size: 1rem; color: #fff; }
 .topnav-user { display: flex; align-items: center; gap: .75rem; font-size: .9rem; }
+
+/* ---- School logo (used in topnav + auth pages, sized by context) ---- */
+.school-logo { height: 40px; width: auto; display: block; }
+.topnav-brand .school-logo { height: 38px; }
 
 /* ---- App Layout ---- */
 .app-layout {
@@ -87,7 +98,7 @@ ul { padding-left: 1.2em; }
     transition: background .15s;
 }
 .assessment-item:hover { background: var(--c-bg); border-color: var(--c-border); }
-.assessment-item.active { background: #e8f1fa; border-color: var(--c-primary); }
+.assessment-item.active { background: var(--gold-tint); border-color: var(--c-primary); }
 .assessment-item.returned { border-left: 3px solid var(--c-warning); }
 .ai-title { font-weight: 600; font-size: .9rem; margin-bottom: .2rem; }
 .ai-meta { font-size: .78rem; color: var(--c-muted); }
@@ -138,7 +149,7 @@ ul { padding-left: 1.2em; }
     padding: 1.25rem;
     box-shadow: var(--shadow);
 }
-.card-title { font-size: 1rem; font-weight: 700; margin-bottom: .75rem; color: var(--c-text); }
+.card-title { font-size: 1rem; font-weight: 700; margin-bottom: .75rem; color: var(--maroon); }
 
 /* ---- Buttons ---- */
 .btn {
@@ -153,8 +164,8 @@ ul { padding-left: 1.2em; }
 }
 .btn-primary   { background: var(--c-primary); color: #fff; border-color: var(--c-primary); }
 .btn-primary:hover { background: var(--c-primary-d); }
-.btn-outline   { background: transparent; color: var(--c-primary); border-color: var(--c-primary); }
-.btn-outline:hover { background: #e8f1fa; }
+.btn-outline   { background: var(--white); color: var(--maroon); border-color: var(--gold); }
+.btn-outline:hover { background: var(--gold-tint); }
 .btn-warning   { background: var(--c-warning); color: #fff; border-color: var(--c-warning); }
 .btn-danger    { background: var(--c-danger); color: #fff; border-color: var(--c-danger); }
 .btn-success   { background: var(--c-success); color: #fff; border-color: var(--c-success); }
@@ -178,8 +189,8 @@ input[type="date"], input[type="email"], select, textarea {
     transition: border-color .15s;
 }
 input:focus, select:focus, textarea:focus {
-    outline: none; border-color: var(--c-primary);
-    box-shadow: 0 0 0 3px rgba(29,111,163,.15);
+    outline: none; border-color: var(--gold);
+    box-shadow: 0 0 0 3px var(--gold-tint-strong);
 }
 .form-fieldset {
     border: 1.5px solid var(--c-border);
@@ -205,35 +216,81 @@ input:focus, select:focus, textarea:focus {
 .check-item:hover { background: var(--c-bg); }
 .check-item input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; }
 
-/* ---- Auth pages ---- */
-.auth-page {
+/* ---- Auth pages: split-screen login/register ---- */
+.auth-page { min-height: 100vh; background: var(--gray-bg); }
+
+.login-split { display: flex; min-height: 100vh; }
+
+/* Left brand panel */
+.login-brand {
+    flex: 0 0 45%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    background: linear-gradient(160deg, var(--maroon) 0%, var(--maroon-dark) 100%);
+    color: #fff;
+    padding: 3rem 2rem;
+}
+.login-brand .school-logo { height: 140px; margin-bottom: 1.5rem; filter: drop-shadow(0 4px 14px rgba(0,0,0,.3)); }
+.login-brand-name {
+    font-size: 1.35rem; font-weight: 700; line-height: 1.35;
+    max-width: 380px; color: #fff;
+}
+.login-brand-division { font-size: .82rem; color: var(--gold-light); margin-top: .6rem; letter-spacing: .02em; }
+.login-brand-divider { width: 56px; height: 3px; background: var(--gold); border-radius: 2px; margin: 1.5rem 0; border: none; }
+.login-brand-tagline {
+    font-size: .85rem; font-weight: 600; color: #fff; opacity: .9;
+    letter-spacing: .06em; text-transform: uppercase;
+}
+
+/* Right form panel */
+.login-form-panel {
+    flex: 1;
     display: flex; align-items: center; justify-content: center;
-    min-height: 100vh;
-    background: linear-gradient(135deg, #1d6fa3 0%, #0d3d61 100%);
-    padding: 1.5rem;
+    padding: 2rem;
 }
-.auth-card {
-    background: var(--c-surface);
-    border-radius: var(--radius);
-    padding: 2rem 2.5rem;
-    width: 100%; max-width: 440px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.25);
+.login-card {
+    background: var(--white);
+    border-radius: 14px;
+    border: 1px solid #ece5d8;
+    box-shadow: 0 8px 32px rgba(26,26,26,.14);
+    padding: 2.5rem;
+    width: 100%; max-width: 420px;
 }
-.auth-card--wide { max-width: 800px; }
-.auth-logo {
-    display: flex; align-items: center; gap: 1rem;
-    margin-bottom: 1.5rem;
+.login-card--wide { max-width: 780px; }
+.login-card-title { font-size: 1.5rem; color: var(--maroon); margin-bottom: .3rem; }
+.login-card-subtitle { font-size: .9rem; color: var(--c-muted); margin-bottom: 1.75rem; }
+
+/* Username / password field icons */
+.input-icon-wrap { position: relative; }
+.input-icon-wrap .input-icon {
+    position: absolute; left: .8rem; top: 50%; transform: translateY(-50%);
+    color: var(--c-muted); display: flex; pointer-events: none;
 }
-.school-badge {
-    width: 48px; height: 48px; border-radius: 50%;
-    background: var(--c-primary); color: #fff;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 800; font-size: .9rem; flex-shrink: 0;
+.input-icon-wrap:focus-within .input-icon { color: var(--maroon); }
+.input-icon-wrap input { padding-left: 2.6rem; }
+.login-card input[type="text"], .login-card input[type="password"] {
+    padding-top: .7rem; padding-bottom: .7rem;
 }
-.auth-school-name { font-weight: 700; font-size: .9rem; line-height: 1.3; }
-.auth-division    { font-size: .77rem; color: var(--c-muted); }
-.auth-title { font-size: 1.15rem; margin-bottom: 1.25rem; color: var(--c-primary); }
-.auth-footer { text-align: center; font-size: .85rem; margin-top: 1rem; color: var(--c-muted); }
+
+.auth-footer { text-align: center; font-size: .85rem; margin-top: 1.25rem; color: var(--c-muted); }
+.auth-footer a { font-weight: 600; }
+
+@media (max-width: 860px) {
+    .login-split { flex-direction: column; }
+    .login-brand {
+        flex: 0 0 auto;
+        padding: 1.75rem 1.25rem;
+    }
+    .login-brand .school-logo { height: 64px; margin-bottom: .6rem; }
+    .login-brand-name { font-size: 1.05rem; max-width: 340px; }
+    .login-brand-division { font-size: .74rem; }
+    .login-brand-divider, .login-brand-tagline { display: none; }
+    .login-form-panel { padding: 1.5rem 1rem 2.5rem; }
+    .login-card, .login-card--wide { max-width: 100%; padding: 1.75rem 1.25rem; }
+}
+@media (max-width: 420px) {
+    .login-card { padding: 1.5rem 1rem; border-radius: 12px; }
+}
 
 /* ---- Alerts ---- */
 .alert {
@@ -311,23 +368,23 @@ input:focus, select:focus, textarea:focus {
     white-space: nowrap;
 }
 .data-table th {
-    background: #e8f1fa; font-weight: 700;
+    background: var(--gold-tint); font-weight: 700; color: var(--maroon-dark);
     position: sticky; top: 0; z-index: 1;
 }
-.data-table tr:nth-child(even) { background: #f7fafc; }
-.data-table tr:hover td { background: #edf5ff; }
-.data-table .row-label { text-align: left; font-weight: 600; background: #f0f4f8; }
-.data-table .total-col { background: #e8f1fa; font-weight: 700; }
-.data-table .summary-row td { background: #dce8f5; font-weight: 700; }
-.data-table .band-row td { background: #f7fafc; }
+.data-table tr:nth-child(even) { background: var(--gray-bg); }
+.data-table tr:hover td { background: var(--gold-tint); }
+.data-table .row-label { text-align: left; font-weight: 600; background: var(--gray-bg); }
+.data-table .total-col { background: var(--gold-tint); font-weight: 700; }
+.data-table .summary-row td { background: var(--gold-tint-strong); font-weight: 700; }
+.data-table .band-row td { background: var(--gray-bg); }
 .data-table input[type="number"] {
     width: 60px; padding: .25rem;
     border: 1px solid var(--c-border);
     border-radius: 4px; text-align: center;
     font-size: .82rem;
 }
-.data-table input[type="number"]:focus { border-color: var(--c-primary); outline: none; }
-.data-table input:read-only { background: #f0f4f8; color: var(--c-muted); }
+.data-table input[type="number"]:focus { border-color: var(--gold); outline: none; box-shadow: 0 0 0 2px var(--gold-tint-strong); }
+.data-table input:read-only { background: var(--gray-bg); color: var(--c-muted); }
 
 /* Item Analysis color coding */
 .pct-red    { background: #fecaca !important; color: #7f1d1d; font-weight: 700; }

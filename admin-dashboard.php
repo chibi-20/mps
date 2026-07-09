@@ -28,6 +28,7 @@ $gradeLevels = [9, 10];  // grades with sections
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Dashboard – MPS System</title>
+<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
 <link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
@@ -35,7 +36,7 @@ $gradeLevels = [9, 10];  // grades with sections
 
 <nav class="topnav">
     <div class="topnav-brand">
-        <span class="topnav-logo">JZG</span>
+        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
         <span class="topnav-title">MPS &amp; Item Analysis System</span>
     </div>
     <div class="topnav-user">
