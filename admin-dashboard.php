@@ -62,7 +62,7 @@ $gradeLevels = [9, 10];  // grades with sections
     <!-- Filters -->
     <div class="filter-bar card">
         <strong>Filters:</strong>
-        <select id="f_sy" onchange="refreshDashboard()">
+        <select id="f_sy">
             <?php foreach ($schoolYears as $sy): ?>
             <option value="<?= $sy['id'] ?>" <?= $sy['id'] == $activeSYId ? 'selected' : '' ?>>
                 SY <?= h($sy['name']) ?>
@@ -75,13 +75,13 @@ $gradeLevels = [9, 10];  // grades with sections
             <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?></option>
             <?php endforeach; ?>
         </select>
-        <select id="f_grade" onchange="refreshDashboard()">
+        <select id="f_grade">
             <option value="">All Grades</option>
             <?php foreach ($gradeLevels as $gl): ?>
             <option value="<?= $gl ?>">Grade <?= $gl ?></option>
             <?php endforeach; ?>
         </select>
-        <select id="f_subject" onchange="refreshDashboard()">
+        <select id="f_subject">
             <option value="">All Subjects</option>
             <?php foreach ($subjects as $sn): ?>
             <option value="<?= h($sn) ?>"><?= h($sn) ?></option>
@@ -122,14 +122,16 @@ $gradeLevels = [9, 10];  // grades with sections
     <!-- Charts Row 1 -->
     <div class="chart-grid chart-grid-2">
         <div class="card chart-card">
-            <h4 class="card-title">MPS per Section
+            <h4 class="card-title">MPS per Subject
                 <small class="text-muted">(target line = 75%)</small>
             </h4>
-            <canvas id="chartMpsSection"></canvas>
+            <canvas id="chartMpsSubject"></canvas>
         </div>
         <div class="card chart-card">
-            <h4 class="card-title">MPS per Subject / Grade</h4>
-            <canvas id="chartMpsSubject"></canvas>
+            <h4 class="card-title">MPS per Grade Level
+                <small class="text-muted">(target line = 75%)</small>
+            </h4>
+            <canvas id="chartMpsGrade"></canvas>
         </div>
     </div>
 

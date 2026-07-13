@@ -49,6 +49,7 @@ $assessments = $asmtStmt->fetchAll();
 if (empty($assessments)) {
     json_response([
         'mps_per_section'     => [],
+        'mps_per_grade'       => [],
         'mps_per_subject'     => [],
         'mastery_distribution'=> [],
         'least_mastered_items'=> [],
@@ -175,6 +176,27 @@ foreach ($subjectMap as $entry) {
     ];
 }
 
+// ---- MPS per Grade Level ----
+$gradeMap = [];
+foreach ($sfRows as $r) {
+    $aId  = (int)$r['assessment_id'];
+    $asmt = array_values(array_filter($assessments, fn($a) => (int)$a['id'] === $aId))[0] ?? null;
+    if (!$asmt) continue;
+    $grade = (int)$asmt['grade_level'];
+    if (!isset($gradeMap[$grade])) {
+        $gradeMap[$grade] = ['cases' => 0, 'fx' => 0, 'ti' => (int)$asmt['total_items']];
+    }
+    $gradeMap[$grade]['cases'] += (int)$r['frequency'];
+    $gradeMap[$grade]['fx']    += (int)$r['frequency'] * (int)$r['score'];
+}
+$mpsPerGrade = [];
+foreach ($gradeMap as $grade => $d) {
+    $mean = $d['cases'] > 0 ? $d['fx'] / $d['cases'] : 0;
+    $mps  = ($d['cases'] > 0 && $d['ti'] > 0) ? $mean / $d['ti'] * 100 : 0;
+    $mpsPerGrade[] = ['grade_level' => $grade, 'mps' => round($mps, 2), 'cases' => $d['cases']];
+}
+usort($mpsPerGrade, fn($a, $b) => $a['grade_level'] <=> $b['grade_level']);
+
 // ---- Item Analysis ----
 $iccStmt = $pdo->prepare(
     "SELECT icc.section_id, icc.item_no, icc.correct_count,
@@ -271,6 +293,7 @@ for ($i = 1; $i <= $maxItem; $i++) {
 
 json_response([
     'mps_per_section'      => $mpsPerSection,
+    'mps_per_grade'        => $mpsPerGrade,
     'mps_per_subject'      => $mpsPerSubject,
     'mastery_distribution' => $masteryDistribution,
     'least_mastered_items' => $leastMastered,

@@ -357,6 +357,40 @@ async function doImportConfirm() {
     loadAssessment(currentAssessmentId);   // reload grids with fresh DB data
 }
 
+// ---- Submit confirmation modal ----
+
+function openSubmitModal() {
+    if (!currentAssessment) return;
+    const { sections } = currentAssessment;
+    const emptySections = sections.filter(s => !(mpsSecCases[s.id] > 0));
+    const warn = document.getElementById('submitEmptyWarning');
+    const list = document.getElementById('submitEmptySectionList');
+    if (emptySections.length > 0) {
+        list.innerHTML = emptySections.map(s => `<li>${escHtml(s.name)}</li>`).join('');
+        warn.style.display = '';
+    } else {
+        warn.style.display = 'none';
+    }
+    document.getElementById('submitModal').style.display = '';
+}
+
+function closeSubmitModal() {
+    document.getElementById('submitModal').style.display = 'none';
+}
+
+async function confirmSubmit() {
+    closeSubmitModal();
+    await saveData('submit');
+}
+
+function updateSubmitState() {
+    const btn = document.getElementById('btnSubmit');
+    if (!btn || !currentAssessment) return;
+    const locked = ['submitted', 'approved'].includes(currentAssessment.assessment.status);
+    if (locked) { btn.disabled = true; return; }
+    btn.disabled = !Object.values(mpsSecCases).some(v => v > 0);
+}
+
 async function loadAssessment(id) {
     // Mark active in sidebar
     document.querySelectorAll('.assessment-item').forEach(el => {
@@ -407,10 +441,9 @@ async function loadAssessment(id) {
         ra.textContent = 'Returned by admin: ' + a.remarks;
     } else { ra.style.display = 'none'; }
 
-    // Lock buttons if submitted/approved
+    // Lock buttons if submitted/approved (Submit state is managed by updateSubmitState())
     const locked = (a.status === 'submitted' || a.status === 'approved');
     document.getElementById('btnSaveDraft').disabled = locked;
-    document.getElementById('btnSubmit').disabled    = locked;
     const btnImport = document.getElementById('btnImportZipgrade');
     if (btnImport) btnImport.style.display = locked ? 'none' : '';
 
@@ -644,6 +677,7 @@ function recomputeMps() {
 
     // Refresh Item Analysis cross-check whenever MPS changes
     recomputeItemTotals();
+    updateSubmitState();
 }
 
 function setCell(selector, val) {
@@ -920,8 +954,8 @@ async function refreshDashboard() {
     if (!data || data.error) { showToast('Failed to load dashboard data.', 'error'); return; }
 
     renderKpis(data.kpis);
-    renderChart('chartMpsSection',   buildMpsSectionChart(data));
     renderChart('chartMpsSubject',   buildMpsSubjectChart(data));
+    renderChart('chartMpsGrade',     buildMpsGradeChart(data));
     renderChart('chartMastery',      buildMasteryChart(data));
     renderChart('chartNpwrm',        buildNpwrmChart(data));
     renderChart('chartLeastMastered',buildLeastMasteredChart(data));
@@ -951,16 +985,16 @@ function renderChart(id, cfg) {
     charts[id] = new Chart(ctx, cfg);
 }
 
-function buildMpsSectionChart(data) {
-    const d = data.mps_per_section || [];
+function buildMpsSubjectChart(data) {
+    const d = data.mps_per_subject || [];
     return {
         type: 'bar',
         data: {
-            labels: d.map(r => r.section_name),
+            labels: d.map(r => r.subject_name + ' G' + r.grade_level),
             datasets: [{
                 label: 'MPS %',
                 data:  d.map(r => +r.mps),
-                backgroundColor: d.map(r => +r.mps >= 75 ? '#52b788' : '#e55934'),
+                backgroundColor: d.map(r => +r.mps >= 75 ? '#52b788' : THEME.maroon),
             }],
         },
         options: {
@@ -975,15 +1009,27 @@ function buildMpsSectionChart(data) {
     };
 }
 
-function buildMpsSubjectChart(data) {
-    const d = data.mps_per_subject || [];
+function buildMpsGradeChart(data) {
+    const d = data.mps_per_grade || [];
     return {
         type: 'bar',
         data: {
-            labels: d.map(r => r.subject_name + ' G' + r.grade_level),
-            datasets: [{ label: 'MPS %', data: d.map(r => +r.mps), backgroundColor: THEME.maroon }],
+            labels: d.map(r => 'Grade ' + r.grade_level),
+            datasets: [{
+                label: 'MPS %',
+                data:  d.map(r => +r.mps),
+                backgroundColor: d.map(r => +r.mps >= 75 ? '#52b788' : THEME.maroon),
+            }],
         },
-        options: { scales: { y: { min:0, max:100 } } },
+        options: {
+            plugins: {
+                legend: { display: false },
+                annotation: {
+                    annotations: { line75: { type:'line', yMin:75, yMax:75, borderColor: THEME.gold, borderWidth:2, label:{content:'Target 75%', display:true} } }
+                },
+            },
+            scales: { y: { min:0, max:100 } },
+        },
     };
 }
 
@@ -1100,6 +1146,11 @@ async function loadSubmissions() {
                 <button class="btn btn-sm btn-success" onclick="approveAssessment(${row.id})">Approve</button>
                 <button class="btn btn-sm btn-warning" onclick="openReturnModal(${row.id})">Return</button>
                 ` : ''}
+                <button class="btn btn-sm btn-danger"
+                        data-aid="${row.id}"
+                        data-title="${escHtml(row.title)}"
+                        data-teacher="${escHtml(row.teacher_name)}"
+                        onclick="adminDeleteAssessment(this)">Delete</button>
             </td>`;
     });
 }
@@ -1110,6 +1161,18 @@ async function approveAssessment(id) {
     if (r.error) { showToast(r.error,'error'); return; }
     showToast('Assessment approved.');
     loadSubmissions();
+}
+
+async function adminDeleteAssessment(btn) {
+    const id      = +btn.dataset.aid;
+    const title   = btn.dataset.title;
+    const teacher = btn.dataset.teacher;
+    if (!confirm(`Delete "${title}" by ${teacher}?\n\nThis permanently removes all its MPS and Item Analysis data and cannot be undone.`)) return;
+    const r = await apiPost('api/admin_delete_assessment.php', { assessment_id: id });
+    if (r.error) { showToast(r.error, 'error'); return; }
+    btn.closest('tr')?.remove();
+    showToast('Assessment deleted.');
+    refreshDashboard();
 }
 
 function openReturnModal(id) {
@@ -1336,13 +1399,16 @@ async function updateFilterDependents() {
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('panel-analytics')) {
-        // Wire grade/subject filters to update dependents
-        ['f_sy','f_grade','f_subject'].forEach(id => {
+        // f_sy / f_grade / f_subject have NO inline onchange — handled here so that
+        // updateFilterDependents() always runs before refreshDashboard(), keeping the
+        // Sections dropdown in sync with the selected Grade before the API call fires.
+        ['f_sy', 'f_grade', 'f_subject'].forEach(id => {
             document.getElementById(id)?.addEventListener('change', async () => {
                 await updateFilterDependents();
                 refreshDashboard();
             });
         });
+        // Initial load
         updateFilterDependents().then(() => refreshDashboard());
     }
 });

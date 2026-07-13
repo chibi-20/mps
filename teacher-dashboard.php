@@ -224,10 +224,16 @@ $csrf = csrf_token();
             </div>
             <div class="assessment-actions">
                 <span id="detailStatus" class="status-chip"></span>
-                <button id="btnSaveDraft" class="btn btn-outline" onclick="saveData('draft')">Save Draft</button>
-                <button id="btnSubmit" class="btn btn-primary" onclick="saveData('submit')">Submit</button>
-                <button id="btnImportZipgrade" class="btn btn-outline" onclick="openImportModal()">&#x2B06; Import ZipGrade</button>
-                <a id="btnExport" href="#" target="_blank" class="btn btn-outline">Export Excel</a>
+                <div class="action-working-group">
+                    <button id="btnImportZipgrade" class="btn btn-import" onclick="openImportModal()">&#x2B06; Import ZipGrade</button>
+                    <button id="btnSaveDraft" class="btn btn-outline" onclick="saveData('draft')">Save Draft</button>
+                    <a id="btnExport" href="#" target="_blank" class="btn btn-outline">Export Excel</a>
+                </div>
+                <div class="action-divider"></div>
+                <div class="submit-group">
+                    <button id="btnSubmit" class="btn btn-submit-final" onclick="openSubmitModal()">&#x1F512; Submit</button>
+                    <span class="submit-hint">Locks all data</span>
+                </div>
             </div>
         </div>
 
@@ -273,6 +279,25 @@ $csrf = csrf_token();
 
 </main>
 </div><!-- /.app-layout -->
+
+<!-- ============================================================
+     SUBMIT CONFIRMATION MODAL
+============================================================ -->
+<div id="submitModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSubmitModal()">
+    <div class="modal-box">
+        <h3 class="submit-modal-title">Submit this assessment?</h3>
+        <p>Once submitted, all MPS and Item Analysis data will be <strong>locked</strong>. You will not be able to make any changes until an administrator returns it for correction.</p>
+        <div id="submitEmptyWarning" class="submit-empty-warning" style="display:none">
+            <strong>Warning — sections with no data entered:</strong>
+            <ul id="submitEmptySectionList"></ul>
+            <p>These sections will remain empty after submission. Proceed anyway?</p>
+        </div>
+        <div class="form-actions" style="margin-top:1.5rem">
+            <button class="btn btn-outline" onclick="closeSubmitModal()">Cancel</button>
+            <button class="btn btn-submit-final" onclick="confirmSubmit()">&#x1F512; Yes, Submit</button>
+        </div>
+    </div>
+</div>
 
 <!-- ============================================================
      ZIPGRADE IMPORT MODAL

@@ -172,6 +172,22 @@ ul { padding-left: 1.2em; }
 .btn-sm        { padding: .3rem .7rem; font-size: .8rem; }
 .btn-full      { width: 100%; justify-content: center; }
 button:disabled, .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-import { background: var(--gold); color: var(--maroon-dark); border-color: var(--gold); font-weight: 700; }
+.btn-import:hover:not(:disabled) { background: var(--gold-light); border-color: var(--gold-light); }
+.btn-submit-final { background: var(--maroon-dark); color: #fff; border-color: var(--maroon-dark); }
+.btn-submit-final:hover:not(:disabled) { background: var(--maroon); border-color: var(--maroon); }
+
+/* Assessment action bar grouping */
+.action-working-group { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.action-divider { width: 1px; height: 2rem; background: var(--c-border); margin: 0 .5rem; flex-shrink: 0; align-self: center; }
+.submit-group { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; }
+.submit-hint { font-size: .69rem; color: var(--c-muted); padding-left: .15rem; }
+
+/* Submit confirmation modal */
+.submit-modal-title { color: var(--maroon-dark); margin-bottom: .75rem; }
+.submit-empty-warning { background: rgba(224,123,0,.08); border: 1.5px solid var(--c-warning); border-radius: var(--radius); padding: .75rem 1rem; margin-top: .75rem; font-size: .875rem; color: #7a4500; }
+.submit-empty-warning ul { margin: .3rem 0 .3rem 1.2rem; padding: 0; }
+.submit-empty-warning p { margin: .5rem 0 0; font-weight: 600; }
 
 /* ---- Forms ---- */
 .form-group { display: flex; flex-direction: column; gap: .3rem; flex: 1; min-width: 140px; }
