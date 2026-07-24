@@ -22,6 +22,13 @@ if ($activeSYId) {
 $subjects    = $pdo->query("SELECT DISTINCT name FROM subjects ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
 $subjectsAll = $pdo->query("SELECT id, name, grade_level FROM subjects ORDER BY grade_level, name")->fetchAll();
 $gradeLevels = [9, 10];  // grades with sections
+
+// All terms across all school years (for edit modal + assessments filter)
+$allTerms = $pdo->query(
+    "SELECT t.id, t.term_no, t.name AS term_name, sy.id AS sy_id, sy.name AS sy_name
+     FROM terms t JOIN school_years sy ON sy.id = t.school_year_id
+     ORDER BY sy.id DESC, t.term_no"
+)->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -52,6 +59,7 @@ $gradeLevels = [9, 10];  // grades with sections
     <button class="admin-tab active" data-panel="analytics"     onclick="adminTab(this,'analytics')">Analytics</button>
     <button class="admin-tab" data-panel="submissions"          onclick="adminTab(this,'submissions')">Submissions</button>
     <button class="admin-tab" data-panel="competencies"         onclick="adminTab(this,'competencies')">Learning Competencies</button>
+    <button class="admin-tab" data-panel="assessments"          onclick="adminTab(this,'assessments')">Assessments</button>
     <button class="admin-tab" data-panel="teachers"             onclick="adminTab(this,'teachers')">Teacher Accounts</button>
     <button class="admin-tab" data-panel="assignments"          onclick="adminTab(this,'assignments')">Section Assignments</button>
     <button class="btn btn-import" style="margin-left:auto;align-self:center;margin-right:.75rem"
@@ -288,9 +296,10 @@ $gradeLevels = [9, 10];  // grades with sections
 ============================================================ -->
 <div id="panel-competencies" class="admin-panel" style="display:none">
     <div class="card">
-        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+        <div class="comp-filter-row">
             <h3 class="card-title" style="margin:0">Learning Competencies</h3>
-            <select id="compSubjectFilter" onchange="loadCompetencies()" style="min-width:180px">
+            <div class="comp-filter-selects">
+            <select id="compSubjectFilter" onchange="loadCompetencies()" style="flex:2;min-width:180px">
                 <option value="">— Select Subject —</option>
                 <?php foreach ($subjectsAll as $s): ?>
                 <option value="<?= $s['id'] ?>" data-grade="<?= $s['grade_level'] ?>">
@@ -298,14 +307,16 @@ $gradeLevels = [9, 10];  // grades with sections
                 </option>
                 <?php endforeach; ?>
             </select>
-            <select id="compTermFilter" onchange="loadCompetencies()" style="min-width:140px">
+            <select id="compTermFilter" onchange="loadCompetencies(); updateCompAddState();" style="flex:1;min-width:140px">
                 <option value="">All Terms</option>
                 <?php foreach ($terms as $t): ?>
                 <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['name']) ?></option>
                 <?php endforeach; ?>
             </select>
-            <button class="btn btn-sm btn-outline" onclick="openCompCsvModal()">&#x2B06; Bulk Import CSV</button>
-        </div>
+            <button class="btn btn-sm btn-outline" id="btnCompCsv" onclick="openCompCsvModal()" disabled
+                    title="Select a subject and term first">&#x2B06; Bulk Import CSV</button>
+            </div><!-- /.comp-filter-selects -->
+        </div><!-- /.comp-filter-row -->
 
         <div id="compEmptyMsg" class="text-muted" style="padding:.5rem 0">
             Select a subject above to view or add competencies.
@@ -314,26 +325,234 @@ $gradeLevels = [9, 10];  // grades with sections
         <div id="compTableWrap" style="display:none">
             <div class="table-scroll">
                 <table class="data-table" id="compTable">
-                    <thead><tr><th style="width:120px">Code</th><th>Description</th><th style="width:90px">Actions</th></tr></thead>
+                    <colgroup>
+                        <col style="width:130px">
+                        <col>
+                        <col style="width:100px">
+                    </colgroup>
+                    <thead><tr><th>Code</th><th>Description</th><th style="text-align:right">Actions</th></tr></thead>
                     <tbody id="compTbody"></tbody>
                 </table>
             </div>
-            <div class="comp-add-row">
+
+            <!-- shown when subject is selected but no specific term chosen -->
+            <p id="compAddHint" class="comp-add-hint" style="display:none">
+                ← Select a specific <strong>Term</strong> above to add competencies.
+            </p>
+
+            <div class="comp-add-row" id="compAddRow" style="display:none">
                 <h4 style="margin:1rem 0 .5rem;font-size:.9rem;color:var(--maroon)">Add Competency</h4>
-                <div class="form-row" style="align-items:flex-end">
-                    <div class="form-group" style="max-width:160px">
+                <div class="form-row comp-add-form-row">
+                    <div class="form-group" style="flex:0 0 190px">
                         <label>Code <small class="text-muted">(optional)</small></label>
                         <input type="text" id="newCompCode" placeholder="e.g. AP10-KIH-Ia-1" maxlength="60">
                     </div>
-                    <div class="form-group" style="flex:3">
+                    <div class="form-group" style="flex:1;min-width:200px">
                         <label>Description <span class="req">*</span></label>
                         <input type="text" id="newCompDesc" placeholder="Learning competency description" maxlength="500">
                     </div>
-                    <div class="form-group" style="flex:none">
+                    <div class="form-group" style="flex:none;align-self:flex-end">
                         <button class="btn btn-primary btn-sm" onclick="adminAddCompetency()">Add</button>
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     PANEL: ASSESSMENTS
+============================================================ -->
+<div id="panel-assessments" class="admin-panel" style="display:none">
+
+    <!-- Filter bar -->
+    <div class="card filter-bar">
+        <strong>Filters:</strong>
+        <select id="af_sy" onchange="loadAsmtTermFilter()">
+            <option value="">All SYs</option>
+            <?php foreach ($schoolYears as $sy): ?>
+            <option value="<?= $sy['id'] ?>" <?= $sy['id'] == $activeSYId ? 'selected' : '' ?>>
+                SY <?= h($sy['name']) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
+        <select id="af_term">
+            <option value="">All Terms</option>
+            <?php foreach ($allTerms as $t): ?>
+            <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['term_name']) ?> (SY <?= h($t['sy_name']) ?>)</option>
+            <?php endforeach; ?>
+        </select>
+        <select id="af_subject">
+            <option value="">All Subjects</option>
+            <?php foreach ($subjectsAll as $s): ?>
+            <option value="<?= $s['id'] ?>"><?= h($s['name']) ?> G<?= $s['grade_level'] ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select id="af_grade">
+            <option value="">All Grades</option>
+            <?php foreach ($gradeLevels as $gl): ?>
+            <option value="<?= $gl ?>">Grade <?= $gl ?></option>
+            <?php endforeach; ?>
+        </select>
+        <select id="af_type">
+            <option value="">All Types</option>
+            <option value="summative">Summative</option>
+            <option value="term_exam">Term Exam</option>
+        </select>
+        <input type="text" id="af_search" placeholder="Search title…" style="flex:1;min-width:140px"
+               onkeydown="if(event.key==='Enter')loadAdminAssessments()">
+        <button class="btn btn-sm btn-outline" onclick="loadAdminAssessments()">Search</button>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+        <div id="asmtListEmpty" class="text-muted" style="display:none;padding:.5rem 0">
+            No admin-created assessments match this filter.
+        </div>
+        <div class="table-scroll" id="asmtListWrap" style="display:none">
+            <table id="asmtListTable" class="data-table">
+                <colgroup>
+                    <col class="asmtcol-title">
+                    <col class="asmtcol-type">
+                    <col class="asmtcol-subject">
+                    <col class="asmtcol-term">
+                    <col class="asmtcol-items">
+                    <col class="asmtcol-date">
+                    <col class="asmtcol-secs">
+                    <col class="asmtcol-teachers">
+                    <col class="asmtcol-status">
+                    <col class="asmtcol-actions">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Subject</th>
+                        <th>Term</th>
+                        <th style="text-align:right">Items</th>
+                        <th>Date Given</th>
+                        <th style="text-align:right">Secs Encoded</th>
+                        <th style="text-align:right">Teachers</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="asmtListTbody"></tbody>
+            </table>
+        </div>
+        <div id="asmtListLoading" class="text-muted" style="padding:.5rem 0">
+            Click <strong>Search</strong> or switch to this tab to load assessments.
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: EDIT ASSESSMENT
+============================================================ -->
+<div id="editAsmtModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeEditAsmtModal()">
+    <div class="modal-box modal-box--wide modal-box--tall">
+
+        <!-- Pinned header -->
+        <div class="modal-tall-header">
+            <h3 style="color:var(--maroon-dark)">Edit Assessment</h3>
+        </div>
+
+        <!-- Scrollable body -->
+        <div class="modal-tall-body">
+
+            <!-- Safe fields -->
+            <div class="form-row">
+                <div class="form-group" style="flex:3">
+                    <label>Title <span class="req">*</span></label>
+                    <input type="text" id="editTitle" maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label>Date Given</label>
+                    <input type="date" id="editDate">
+                </div>
+            </div>
+            <div class="form-group" style="max-width:320px">
+                <label>Term <span class="req">*</span></label>
+                <select id="editTerm">
+                    <option value="">— select —</option>
+                    <?php foreach ($allTerms as $t): ?>
+                    <option value="<?= $t['id'] ?>">
+                        Term <?= $t['term_no'] ?> — <?= h($t['term_name']) ?> (SY <?= h($t['sy_name']) ?>)
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <!-- Conditionally locked destructive fields -->
+            <div class="form-row" style="margin-top:.25rem">
+                <div class="form-group" style="max-width:200px">
+                    <label>Type</label>
+                    <select id="editType">
+                        <option value="summative">Summative Test</option>
+                        <option value="term_exam">Term Exam</option>
+                    </select>
+                </div>
+                <div class="form-group" style="max-width:160px">
+                    <label>Total Items</label>
+                    <input type="number" id="editTotalItems" min="1" max="200">
+                </div>
+            </div>
+            <div id="editDataLockNotice" class="edit-lock-notice" style="display:none"></div>
+
+            <!-- Competency mapping -->
+            <div style="margin-top:1.25rem;border-top:1px solid var(--c-border);padding-top:1rem">
+                <h4 style="margin:0 0 .5rem;font-size:.9rem;color:var(--maroon)">Competency Mapping</h4>
+                <p class="text-muted" style="font-size:.82rem;margin-bottom:.75rem">
+                    Map each item to its learning competency. Safe to edit at any time — does not affect encoded scores.
+                </p>
+                <div class="bulk-assign-bar">
+                    <label>Bulk assign:</label>
+                    <select id="editBulkCompSel" style="flex:2"></select>
+                    <span style="white-space:nowrap">to items</span>
+                    <input type="number" id="editBulkFrom" min="1" style="width:60px" placeholder="1">
+                    <span>–</span>
+                    <input type="number" id="editBulkTo" min="1" style="width:60px">
+                    <button class="btn btn-sm btn-outline" onclick="applyEditBulkAssign()">Apply</button>
+                </div>
+                <div id="editCompMappingGrid" style="overflow-y:auto;margin-top:.75rem">
+                    <p class="text-muted">Loading…</p>
+                </div>
+                <div id="editCompMappingSummary" class="comp-summary" style="margin-top:.5rem"></div>
+            </div>
+
+        </div><!-- /.modal-tall-body -->
+
+        <!-- Pinned footer -->
+        <div class="modal-tall-footer">
+            <button id="btnSaveEdit" class="btn btn-primary" onclick="saveEditAsmt()">Save Changes</button>
+            <span id="editAsmtErr" style="font-size:.84rem;color:var(--c-danger);flex:1"></span>
+            <button class="btn btn-outline" onclick="closeEditAsmtModal()">Cancel</button>
+        </div>
+
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: DELETE ASSESSMENT (with blast radius)
+============================================================ -->
+<div id="deleteAsmtModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeDeleteAsmtModal()">
+    <div class="modal-box">
+        <h3 style="color:var(--maroon-dark);margin-bottom:1rem">Delete Assessment?</h3>
+        <div id="deleteAsmtInfo">
+            <p class="text-muted">Loading…</p>
+        </div>
+        <div id="deleteAsmtConfirmBox" style="display:none;margin-top:1rem">
+            <p style="font-size:.88rem">Type <strong>DELETE</strong> to confirm permanent deletion:</p>
+            <input type="text" id="deleteConfirmInput" placeholder="Type DELETE"
+                   style="width:100%;margin-top:.35rem"
+                   oninput="document.getElementById('btnConfirmDelete').disabled = this.value !== 'DELETE'">
+        </div>
+        <div class="form-actions" style="margin-top:1.25rem">
+            <button id="btnConfirmDelete" class="btn btn-danger" onclick="confirmDeleteAsmtById()">
+                &#x1F5D1; Delete
+            </button>
+            <span id="deleteAsmtErr" style="font-size:.84rem;color:var(--c-danger);flex:1"></span>
+            <button class="btn btn-outline" onclick="closeDeleteAsmtModal()">Cancel</button>
         </div>
     </div>
 </div>
@@ -492,6 +711,7 @@ const BAND_COLORS     = {
     AVR:'#ffd166', LM:'#ef8c44', VLM:'#e55934', ANM:'#9d0208'
 };
 const SUBJECTS_ALL    = <?= json_encode($subjectsAll) ?>;
+const ALL_TERMS       = <?= json_encode($allTerms) ?>;
 </script>
 <script src="<?= BASE_URL ?>script.js"></script>
 </body>

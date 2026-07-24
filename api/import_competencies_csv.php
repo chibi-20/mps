@@ -11,6 +11,7 @@ $termId    = validate_int($_POST['term_id']    ?? null, 1);
 $csvText   = trim($_POST['csv_text'] ?? '');
 
 if (!$subjectId) json_response(['error' => 'Missing subject_id.'], 400);
+if (!$termId)    json_response(['error' => 'A specific Term must be selected to import competencies.'], 422);
 if ($csvText === '') json_response(['error' => 'CSV text is empty.'], 422);
 
 $lines  = preg_split('/\r?\n/', $csvText);

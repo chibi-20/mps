@@ -20,9 +20,10 @@ if ($action === 'insert' || $action === 'update') {
     if ($description === '') json_response(['error' => 'Description is required.'], 422);
 
     if ($action === 'insert') {
+        if (!$termId) json_response(['error' => 'A specific Term must be selected to add a competency.'], 422);
         $pdo->prepare(
             "INSERT INTO competencies (subject_id, term_id, code, description) VALUES (?,?,?,?)"
-        )->execute([$subjectId, $termId ?: null, $code ?: null, $description]);
+        )->execute([$subjectId, $termId, $code ?: null, $description]);
         json_response(['success' => true, 'id' => (int)$pdo->lastInsertId()]);
     }
 

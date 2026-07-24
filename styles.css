@@ -139,7 +139,17 @@ ul { padding-left: 1.2em; }
 }
 .admin-tab:hover { color: var(--c-primary); }
 .admin-tab.active { color: var(--c-primary); border-bottom-color: var(--c-primary); }
-.admin-panel { padding: 1.25rem; display: flex; flex-direction: column; gap: 1rem; }
+.admin-panel {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+    width: 100%;
+}
 
 /* ---- Cards ---- */
 .card {
@@ -456,9 +466,43 @@ input:focus, select:focus, textarea:focus {
     min-width: 420px; max-width: 600px;
     width: 100%;
     box-shadow: 0 8px 32px rgba(0,0,0,.25);
+    /* Safety net: no modal ever escapes the viewport */
+    max-height: 92vh;
+    overflow-y: auto;
 }
 .modal-box h3 { margin-bottom: 1rem; }
 .modal-box--wide { min-width: 520px; max-width: 740px; }
+
+/* Tall modals (many fields + mapping grid): sticky header + scrollable body + pinned footer */
+.modal-box--tall {
+    padding: 0;
+    overflow: hidden;          /* body handles its own scroll */
+    display: flex;
+    flex-direction: column;
+}
+.modal-box--tall > .modal-tall-header {
+    flex-shrink: 0;
+    padding: 1.5rem 2rem 1rem;
+    border-bottom: 1px solid var(--c-border);
+}
+.modal-box--tall > .modal-tall-header h3 { margin: 0; }
+.modal-tall-body {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;             /* required for flex overflow to work */
+    padding: 1.25rem 2rem;
+}
+.modal-box--tall > .modal-tall-footer {
+    flex-shrink: 0;
+    padding: 1rem 2rem 1.5rem;
+    border-top: 1px solid var(--c-border);
+    background: var(--c-surface);
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+}
+/* Shrink mapping grid inside tall modal so form fields stay visible */
+.modal-tall-body #editCompMappingGrid { max-height: 36vh; }
 
 /* ---- ZipGrade Import Preview ---- */
 .import-stats {
@@ -526,6 +570,44 @@ input:focus, select:focus, textarea:focus {
 .comp-col { font-size: .75rem; color: var(--c-muted); max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- Competency management panel ---- */
+
+/* Filter row: title + selects + CSV button in one responsive row */
+.comp-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+.comp-filter-row > h3 { flex-shrink: 0; }
+.comp-filter-selects {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    flex: 1;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.comp-filter-selects select { flex: 1; min-width: 130px; max-width: 280px; }
+.comp-filter-selects .btn   { flex-shrink: 0; white-space: nowrap; }
+
+/* Competency table: Code narrow, Description fills, Actions right-aligned */
+#compTable th:last-child,
+#compTable td:last-child { text-align: right; }
+
+/* Hint shown when subject selected but no term chosen */
+.comp-add-hint {
+    color: var(--c-muted);
+    font-size: .85rem;
+    font-style: italic;
+    padding: .6rem .25rem .25rem;
+    border-top: 1px solid var(--c-border);
+    margin-top: .75rem;
+}
+
+/* Add form: capped width so it doesn't stretch on wide screens */
+.comp-add-form-row { max-width: 860px; }
+
 .comp-add-row { border-top: 1px solid var(--c-border); padding-top: .75rem; margin-top: .75rem; }
 
 /* ---- Create Assessment Modal — Step Indicator ---- */
@@ -606,7 +688,110 @@ input:focus, select:focus, textarea:focus {
 .select-asmt-card-badge   { font-size: .72rem; color: var(--c-success); font-weight: 600; }
 
 /* ---- Competency drill-down table in dashboard ---- */
-#compDrillTable table { font-size: .82rem; }
-#compDrillTable .pct-red    { color: var(--c-danger);  font-weight: 700; }
-#compDrillTable .pct-yellow { color: var(--c-warning); font-weight: 700; }
-#compDrillTable .pct-green  { color: var(--c-success); font-weight: 700; }
+
+/* #compDrillTable already has class="table-scroll" so overflow-x:auto is inherited */
+.comp-drill-table {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 620px;    /* lets it scroll horizontally on narrow screens */
+    font-size: .82rem;
+}
+
+/* Column widths — respected because table-layout:fixed */
+.comp-drill-table col.col-code { width: 130px; }
+.comp-drill-table col.col-pct  { width: 110px; }
+.comp-drill-table col.col-sec  { width:  88px; }
+.comp-drill-table col.col-num  { width:  92px; }
+/* col-desc gets the remaining space automatically */
+
+/* Cells: allow wrapping, top-align, consistent padding */
+.comp-drill-table th,
+.comp-drill-table td {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    vertical-align: top;
+    padding: .5rem .75rem;
+}
+
+/* Numeric columns: right-align headers and cells */
+.comp-drill-table th:nth-child(n+3),
+.comp-drill-table td:nth-child(n+3) { text-align: right; }
+
+/* % Correct cell: keep background color-coding on the cell only;
+   reset text color so global .pct-* values are used */
+.comp-drill-table .pct-red,
+.comp-drill-table .pct-yellow,
+.comp-drill-table .pct-green { color: inherit; font-weight: 700; }
+
+/* ---- Wrapping for other admin text-heavy tables ---- */
+/* Submissions: Assessment title + remarks can overflow */
+/* Teacher accounts: Subjects list can overflow */
+/* Competency management: Description column */
+#complianceTable th,  #complianceTable td,
+#compTable th,        #compTable td,
+#panel-teachers .data-table th,
+#panel-teachers .data-table td {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    vertical-align: top;
+}
+
+/* ============================================================
+   ADMIN: ASSESSMENTS TAB
+   ============================================================ */
+
+/* Fixed-layout table so column widths are enforced */
+#asmtListTable {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 860px;
+}
+
+/* Column widths */
+#asmtListTable col.asmtcol-title    { width: auto; }          /* fills remaining space */
+#asmtListTable col.asmtcol-type     { width: 100px; }
+#asmtListTable col.asmtcol-subject  { width: 160px; }
+#asmtListTable col.asmtcol-term     { width:  80px; }
+#asmtListTable col.asmtcol-items    { width:  68px; }
+#asmtListTable col.asmtcol-date     { width: 100px; }
+#asmtListTable col.asmtcol-secs     { width: 100px; }
+#asmtListTable col.asmtcol-teachers { width:  84px; }
+#asmtListTable col.asmtcol-status   { width:  90px; }
+#asmtListTable col.asmtcol-actions  { width: 110px; }
+
+/* Cells wrap; top-align so multi-line titles don't look off */
+#asmtListTable th,
+#asmtListTable td {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    vertical-align: top;
+}
+
+/* Actions column: keep buttons on one line */
+#asmtListTable td.asmt-actions-cell { white-space: nowrap; }
+
+/* Destructive-field lock notice inside edit modal */
+.edit-lock-notice {
+    background: rgba(224,123,0,.08);
+    border: 1.5px solid var(--c-warning);
+    border-radius: var(--radius);
+    padding: .6rem .9rem;
+    font-size: .85rem;
+    color: #6b3a00;
+    margin-top: .25rem;
+}
+
+/* Blast radius warning inside delete modal */
+.blast-radius-box {
+    background: rgba(220,38,38,.07);
+    border: 1.5px solid var(--c-danger);
+    border-radius: var(--radius);
+    padding: .75rem 1rem;
+    margin-top: .75rem;
+    font-size: .88rem;
+    color: #7f1d1d;
+    line-height: 1.55;
+}

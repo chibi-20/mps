@@ -30,16 +30,37 @@ if (!in_array($action, ['preview', 'confirm'], true)) {
 
 $pdo = get_pdo();
 
-// Ownership + status check
-$stmt = $pdo->prepare("SELECT teacher_id, status, total_items FROM assessments WHERE id = ?");
+// Ownership + status check (handles both legacy and admin-shared assessments)
+$stmt = $pdo->prepare("SELECT teacher_id, status, total_items, COALESCE(is_shared,0) AS is_shared FROM assessments WHERE id = ?");
 $stmt->execute([$assessment_id]);
 $asmt = $stmt->fetch();
-if (!$asmt || (int)$asmt['teacher_id'] !== $uid) {
+if (!$asmt) {
     json_response(['error' => 'Not found or access denied.'], 403);
 }
-if (in_array($asmt['status'], ['submitted', 'approved'], true)) {
-    json_response(['error' => 'Assessment is locked and cannot be edited.'], 409);
+
+$isShared = (int)$asmt['is_shared'];
+
+if ($isShared) {
+    // Shared assessment: verify the teacher has an encoding row and it isn't locked
+    $taeChk = $pdo->prepare("SELECT status FROM teacher_assessment_encodings WHERE assessment_id = ? AND teacher_id = ?");
+    $taeChk->execute([$assessment_id, $uid]);
+    $tae = $taeChk->fetch();
+    if (!$tae) {
+        json_response(['error' => 'Not found or access denied.'], 403);
+    }
+    if (in_array($tae['status'], ['submitted', 'approved'], true)) {
+        json_response(['error' => 'Assessment is locked and cannot be edited.'], 409);
+    }
+} else {
+    // Legacy assessment: teacher must own it and it must not be locked
+    if ((int)$asmt['teacher_id'] !== $uid) {
+        json_response(['error' => 'Not found or access denied.'], 403);
+    }
+    if (in_array($asmt['status'], ['submitted', 'approved'], true)) {
+        json_response(['error' => 'Assessment is locked and cannot be edited.'], 409);
+    }
 }
+
 $totalItems = (int)$asmt['total_items'];
 
 // Section must belong to this assessment
@@ -294,8 +315,13 @@ try {
         $iccStmt->execute([$assessment_id, $section_id, (int)$itemNo, (int)$count]);
     }
 
-    $pdo->prepare("UPDATE assessments SET updated_at = NOW() WHERE id = ?")
-        ->execute([$assessment_id]);
+    if ($isShared) {
+        $pdo->prepare("UPDATE teacher_assessment_encodings SET updated_at = NOW() WHERE assessment_id = ? AND teacher_id = ?")
+            ->execute([$assessment_id, $uid]);
+    } else {
+        $pdo->prepare("UPDATE assessments SET updated_at = NOW() WHERE id = ?")
+            ->execute([$assessment_id]);
+    }
 
     $pdo->commit();
     json_response([

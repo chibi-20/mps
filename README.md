@@ -139,8 +139,84 @@ All thresholds live in `includes/config.php` under `MASTERY_BANDS` and `MASTERY_
 
 ## Excel Export
 Uses **PhpSpreadsheet** (server-side). Requires the `vendor/` folder.
-The exported `.xlsx` has two sheets:
+The exported `.xlsx` has three sheets:
 - **MPS** — Frequency of Scores table + CASES/MEAN/MPS/bands/NPWRM summary
 - **ITEM ANALYSIS** — % correct per item per section
+- **COMPETENCY ANALYSIS** — per-competency mastery rates aggregated across sections
 
 Both sheets include the full DepEd header block.
+
+---
+
+## Recent Updates (R6 — Admin-Created Assessment Blueprint)
+
+### Admin: Learning Competencies Management
+- New **Learning Competencies** tab in the admin dashboard.
+- CRUD (add / edit / delete) per subject + term.
+- **Bulk CSV import** (requires a specific term selected; blocked at both client and server when "All Terms" is active).
+
+### Admin: Create Assessment (Blueprint)
+- 4-step modal: choose type → set term/subject/title → map items to competencies → confirm.
+- Admin-created assessments are flagged `is_shared = 1` and have no `teacher_id`.
+- Item → competency mapping stored in `assessment_item_competencies`.
+
+### Admin: Assessments Tab
+- Lists all admin-created assessments with filter bar (SY / Term / Subject / Grade / Type / keyword).
+- **Edit** — updates title, term, date, type (locked when data exists), total items (locked when data exists), and competency map.
+- **Delete** — shows blast radius (sections, students, teachers) before confirming; requires typing `DELETE` when encoded data exists.
+
+### Teacher: Select Shared Assessment
+- Teachers no longer create assessments from scratch for admin-blueprinted tests.
+- A **Select Assessment** panel lists available shared assessments; teacher picks one, selects their sections, and begins encoding.
+- Per-teacher encoding status tracked in `teacher_assessment_encodings`.
+
+### Analytics: Least-Mastered Learning Competencies
+- New chart + drill-down table on the admin dashboard showing competency mastery rates.
+- Drill-down table uses `table-layout: fixed` with named `<col>` widths to prevent text overflow.
+
+### ZipGrade Import Fix
+- Shared (admin-created) assessments now correctly pass the ownership check in `api/import_zipgrade.php` by verifying `teacher_assessment_encodings` instead of `teacher_id`.
+
+### DB Tables Added
+Run the following in phpMyAdmin after pulling these changes:
+```sql
+-- Per-competency definitions
+CREATE TABLE IF NOT EXISTS learning_competencies (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    subject_id  INT UNSIGNED NOT NULL,
+    term_id     INT UNSIGNED NOT NULL,
+    code        VARCHAR(50)  NOT NULL,
+    description TEXT         NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (subject_id) REFERENCES subjects(id)  ON DELETE CASCADE,
+    FOREIGN KEY (term_id)    REFERENCES terms(id)     ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Item → competency mapping per assessment
+CREATE TABLE IF NOT EXISTS assessment_item_competencies (
+    id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    assessment_id  INT UNSIGNED NOT NULL,
+    item_no        SMALLINT UNSIGNED NOT NULL,
+    competency_id  INT UNSIGNED NOT NULL,
+    UNIQUE KEY uq_aic (assessment_id, item_no),
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id)            ON DELETE CASCADE,
+    FOREIGN KEY (competency_id) REFERENCES learning_competencies(id)  ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Per-teacher encoding status for shared assessments
+CREATE TABLE IF NOT EXISTS teacher_assessment_encodings (
+    id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    assessment_id  INT UNSIGNED NOT NULL,
+    teacher_id     INT UNSIGNED NOT NULL,
+    status         ENUM('pending','submitted','approved','returned') NOT NULL DEFAULT 'pending',
+    remarks        TEXT,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_tae (assessment_id, teacher_id),
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE,
+    FOREIGN KEY (teacher_id)    REFERENCES teachers(id)    ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add is_shared flag to assessments (if not already present)
+ALTER TABLE assessments ADD COLUMN IF NOT EXISTS is_shared TINYINT(1) NOT NULL DEFAULT 0;
+```

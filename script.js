@@ -1271,6 +1271,7 @@ function adminTab(btn, panel) {
     if (panel === 'submissions') loadSubmissions();
     if (panel === 'teachers')    loadTeachers();
     if (panel === 'assignments') initAssignmentsPanel();
+    if (panel === 'assessments') loadAdminAssessments();
 }
 
 // ============================================================
@@ -1556,9 +1557,10 @@ async function loadCompetencies() {
     const rows = data.competencies || [];
     if (!rows.length) {
         emptyMsg.style.display = '';
-        emptyMsg.textContent   = 'No competencies found for this subject/term. Add them below.';
+        emptyMsg.textContent   = 'No competencies found for this filter. Add one below.';
         wrap.style.display = 'block';
         tbody.innerHTML = '<tr><td colspan="3" class="text-muted" style="text-align:center">No competencies yet.</td></tr>';
+        updateCompAddState();
         return;
     }
 
@@ -1568,11 +1570,29 @@ async function loadCompetencies() {
         <tr id="compRow${c.id}">
             <td><span id="ccode${c.id}">${escHtml(c.code || '—')}</span></td>
             <td><span id="cdesc${c.id}">${escHtml(c.description)}</span></td>
-            <td>
+            <td style="text-align:right">
                 <button class="btn btn-sm btn-outline" onclick="adminEditCompetency(${c.id},'${escHtml(c.code || '')}','${escHtml(c.description).replace(/'/g,"\\'")}')">Edit</button>
                 <button class="btn btn-sm btn-danger"  onclick="adminDeleteCompetency(${c.id})">Del</button>
             </td>
         </tr>`).join('');
+    updateCompAddState();
+}
+
+function updateCompAddState() {
+    const subjectId = document.getElementById('compSubjectFilter')?.value;
+    const termId    = document.getElementById('compTermFilter')?.value;
+    const addRow    = document.getElementById('compAddRow');
+    const addHint   = document.getElementById('compAddHint');
+    const csvBtn    = document.getElementById('btnCompCsv');
+
+    const canAdd = !!(subjectId && termId);
+
+    if (addRow)  addRow.style.display  = canAdd ? '' : 'none';
+    if (addHint) addHint.style.display = (subjectId && !termId) ? '' : 'none';
+    if (csvBtn) {
+        csvBtn.disabled = !canAdd;
+        csvBtn.title    = canAdd ? '' : 'Select a subject and a specific term first';
+    }
 }
 
 async function adminAddCompetency() {
@@ -1581,11 +1601,12 @@ async function adminAddCompetency() {
     const code      = document.getElementById('newCompCode').value.trim();
     const desc      = document.getElementById('newCompDesc').value.trim();
     if (!subjectId) { showToast('Select a subject first.', 'error'); return; }
+    if (!termId)    { showToast('Select a specific Term first.', 'error'); return; }
     if (!desc)      { showToast('Description is required.', 'error'); return; }
 
     const r = await apiPost('api/save_competency.php', {
         action: 'insert', subject_id: +subjectId,
-        term_id: termId ? +termId : null, code, description: desc,
+        term_id: +termId, code, description: desc,
     });
     if (r.error) { showToast(r.error, 'error'); return; }
     document.getElementById('newCompCode').value = '';
@@ -1623,8 +1644,10 @@ async function adminDeleteCompetency(id) {
 
 function openCompCsvModal() {
     const subjectId = document.getElementById('compSubjectFilter')?.value;
+    const termId    = document.getElementById('compTermFilter')?.value;
     if (!subjectId) { showToast('Select a subject first.', 'error'); return; }
-    document.getElementById('compCsvText').value   = '';
+    if (!termId)    { showToast('Select a specific Term before importing — imported rows need a term to be saved to.', 'error'); return; }
+    document.getElementById('compCsvText').value        = '';
     document.getElementById('compCsvResult').textContent = '';
     document.getElementById('compCsvModal').style.display = '';
 }
@@ -1949,26 +1972,378 @@ function renderCompetencySection(data) {
 
     // Drill-down table
     drillEl.innerHTML = `
-        <table class="data-table" style="font-size:.82rem;margin-top:.5rem">
+        <table class="data-table comp-drill-table">
+            <colgroup>
+                <col class="col-code">
+                <col class="col-desc">
+                <col class="col-pct">
+                <col class="col-sec">
+                <col class="col-num">
+                <col class="col-num">
+            </colgroup>
             <thead><tr>
-                <th>Code</th><th>Description</th>
-                <th style="text-align:center">% Correct</th>
-                <th style="text-align:center">Sections</th>
-                <th style="text-align:center">f Correct</th>
-                <th style="text-align:center">f Total</th>
+                <th>Code</th>
+                <th>Description</th>
+                <th>% Correct</th>
+                <th>Sections</th>
+                <th>f Correct</th>
+                <th>f Total</th>
             </tr></thead>
             <tbody>
             ${rows.map(r => {
                 const cls = r.pct < 50 ? 'pct-red' : r.pct < 75 ? 'pct-yellow' : 'pct-green';
                 return `<tr>
                     <td>${escHtml(r.code || '—')}</td>
-                    <td style="max-width:280px">${escHtml(r.description)}</td>
-                    <td class="${cls}" style="text-align:center">${r.pct}%</td>
-                    <td style="text-align:center">${r.section_count}</td>
-                    <td style="text-align:center">${r.total_correct}</td>
-                    <td style="text-align:center">${r.total_possible}</td>
+                    <td>${escHtml(r.description)}</td>
+                    <td class="${cls}">${r.pct.toFixed(1)}%</td>
+                    <td>${r.section_count}</td>
+                    <td>${r.total_correct}</td>
+                    <td>${r.total_possible}</td>
                 </tr>`;
             }).join('')}
             </tbody>
         </table>`;
+}
+
+// ============================================================
+// ADMIN: ASSESSMENTS TAB
+// ============================================================
+
+let _adminAssessments = [];   // cache for delete blast radius lookup
+let _editAsmtId       = null;
+let _editHasData      = false;
+let _editTotalItems   = 0;
+let _editCompetencies = [];
+let _editItemCompMap  = {};
+let _deleteAsmtId     = null;
+
+// ---- Filter: update term dropdown when SY changes ----
+function loadAsmtTermFilter() {
+    const syId  = +document.getElementById('af_sy').value;
+    const sel   = document.getElementById('af_term');
+    const prev  = sel.value;
+    sel.innerHTML = '<option value="">All Terms</option>';
+    (typeof ALL_TERMS !== 'undefined' ? ALL_TERMS : [])
+        .filter(t => !syId || +t.sy_id === syId)
+        .forEach(t => {
+            const o = new Option(
+                `Term ${t.term_no} — ${t.term_name} (SY ${t.sy_name})`,
+                t.id
+            );
+            if (+t.id === +prev) o.selected = true;
+            sel.appendChild(o);
+        });
+}
+
+// ---- Load & render list ----
+async function loadAdminAssessments() {
+    const params = new URLSearchParams();
+    const v = id => document.getElementById(id)?.value;
+    if (v('af_sy'))      params.set('sy_id',      v('af_sy'));
+    if (v('af_term'))    params.set('term_id',     v('af_term'));
+    if (v('af_subject')) params.set('subject_id',  v('af_subject'));
+    if (v('af_grade'))   params.set('grade',       v('af_grade'));
+    if (v('af_type'))    params.set('type',        v('af_type'));
+    const srch = v('af_search')?.trim();
+    if (srch) params.set('search', srch);
+
+    document.getElementById('asmtListLoading').style.display = '';
+    document.getElementById('asmtListLoading').textContent   = 'Loading…';
+    document.getElementById('asmtListWrap').style.display    = 'none';
+    document.getElementById('asmtListEmpty').style.display   = 'none';
+
+    const data = await apiGet('api/get_admin_assessments.php?' + params);
+    document.getElementById('asmtListLoading').style.display = 'none';
+
+    if (data.error) {
+        document.getElementById('asmtListEmpty').style.display = '';
+        document.getElementById('asmtListEmpty').textContent   = data.error;
+        return;
+    }
+
+    _adminAssessments = data.assessments || [];
+
+    if (!_adminAssessments.length) {
+        document.getElementById('asmtListEmpty').style.display = '';
+        return;
+    }
+
+    const tbody = document.getElementById('asmtListTbody');
+    const typeLabel = { summative: 'Summative', term_exam: 'Term Exam' };
+
+    tbody.innerHTML = _adminAssessments.map(a => `
+        <tr id="asmtRow${a.id}">
+            <td>${escHtml(a.title)}</td>
+            <td>${typeLabel[a.type] || escHtml(a.type)}</td>
+            <td>${escHtml(a.subject_name)} <small class="text-muted">G${a.grade_level}</small></td>
+            <td>Term ${a.term_no}</td>
+            <td style="text-align:right">${a.total_items}</td>
+            <td>${a.date_given || '—'}</td>
+            <td style="text-align:right">${a.sections_encoded}</td>
+            <td style="text-align:right">${a.teachers_encoded}</td>
+            <td><span class="status-chip status-${a.status}">${escHtml(a.status)}</span></td>
+            <td class="asmt-actions-cell">
+                <button class="btn btn-sm btn-outline" onclick="openEditAsmtModal(${a.id})">Edit</button>
+                <button class="btn btn-sm btn-danger"  onclick="openDeleteAsmtModal(${a.id})">Delete</button>
+            </td>
+        </tr>`).join('');
+
+    document.getElementById('asmtListWrap').style.display = '';
+}
+
+// ============================================================
+// ADMIN: EDIT ASSESSMENT MODAL
+// ============================================================
+
+async function openEditAsmtModal(id) {
+    _editAsmtId = id;
+    document.getElementById('editAsmtErr').textContent = '';
+    document.getElementById('editCompMappingGrid').innerHTML = '<p class="text-muted">Loading…</p>';
+    document.getElementById('editCompMappingSummary').innerHTML = '';
+    document.getElementById('editAsmtModal').style.display = '';
+
+    const data = await apiGet(`api/get_admin_assessment.php?id=${id}`);
+    if (data.error) {
+        document.getElementById('editAsmtErr').textContent = data.error;
+        return;
+    }
+
+    const a = data.assessment;
+    _editHasData    = data.has_data;
+    _editTotalItems = +a.total_items;
+    _editItemCompMap = {};
+    for (const [k, v] of Object.entries(data.competency_map || {})) {
+        _editItemCompMap[+k] = v.competency_id;
+    }
+
+    // Prefill safe fields
+    document.getElementById('editTitle').value = a.title;
+    document.getElementById('editDate').value  = a.date_given || '';
+
+    const termSel = document.getElementById('editTerm');
+    termSel.value = a.term_id;
+
+    // Destructive fields
+    const typeSel  = document.getElementById('editType');
+    const itemsInp = document.getElementById('editTotalItems');
+    typeSel.value  = a.type;
+    itemsInp.value = a.total_items;
+
+    const lockNotice = document.getElementById('editDataLockNotice');
+    if (_editHasData) {
+        typeSel.disabled  = true;
+        itemsInp.disabled = true;
+        lockNotice.style.display = '';
+        lockNotice.innerHTML =
+            `<strong>🔒 ${data.sections_encoded} section(s) have already encoded data.</strong>
+             Changing the item count would invalidate their MPS and Item Analysis.
+             Delete the encoded data first, or create a new assessment.`;
+    } else {
+        typeSel.disabled  = false;
+        itemsInp.disabled = false;
+        lockNotice.style.display = 'none';
+    }
+
+    // Load competency mapping grid
+    await buildEditMappingGrid(a.subject_id, a.term_id, _editTotalItems);
+}
+
+async function buildEditMappingGrid(subjectId, termId, totalItems) {
+    const grid    = document.getElementById('editCompMappingGrid');
+    const bulkSel = document.getElementById('editBulkCompSel');
+
+    grid.innerHTML    = '<p class="text-muted">Loading competencies…</p>';
+    bulkSel.innerHTML = '<option value="">— select competency —</option>';
+    document.getElementById('editBulkTo').value = totalItems;
+
+    const data = await apiGet(`api/get_competencies.php?subject_id=${subjectId}&term_id=${termId}`);
+    _editCompetencies = data.competencies || [];
+
+    if (!_editCompetencies.length) {
+        grid.innerHTML = `<div class="alert alert-warning">No competencies for this subject/term.
+            Add them in the Learning Competencies tab first.</div>`;
+        return;
+    }
+
+    _editCompetencies.forEach(c => {
+        const o = new Option((c.code ? c.code + ' — ' : '') + c.description.substring(0, 60), c.id);
+        bulkSel.appendChild(o);
+    });
+
+    const optHtml = `<option value="">— unassigned —</option>` +
+        _editCompetencies.map(c =>
+            `<option value="${c.id}">${escHtml((c.code ? c.code + ' — ' : '') + c.description.substring(0, 60))}</option>`
+        ).join('');
+
+    let rows = '';
+    for (let i = 1; i <= totalItems; i++) {
+        const saved = _editItemCompMap[i] || '';
+        rows += `<tr><td>${i}</td><td>
+            <select data-item="${i}" onchange="updateEditItemCompSummary()" style="width:100%">
+                ${optHtml.replace(`value="${saved}"`, `value="${saved}" selected`)}
+            </select></td></tr>`;
+    }
+    grid.innerHTML = `<table class="comp-map-table">
+        <thead><tr><th>#</th><th>Learning Competency</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+
+    updateEditItemCompSummary();
+}
+
+function applyEditBulkAssign() {
+    const compId = document.getElementById('editBulkCompSel').value;
+    const from   = +document.getElementById('editBulkFrom').value;
+    const to     = +document.getElementById('editBulkTo').value;
+    if (!compId || !from || !to || from > to) {
+        showToast('Select a competency and a valid item range.', 'error'); return;
+    }
+    document.querySelectorAll('#editCompMappingGrid select[data-item]').forEach(sel => {
+        const item = +sel.dataset.item;
+        if (item >= from && item <= to) sel.value = compId;
+    });
+    updateEditItemCompSummary();
+}
+
+function updateEditItemCompSummary() {
+    const summary    = document.getElementById('editCompMappingSummary');
+    const counts     = {};
+    let   unassigned = 0;
+
+    document.querySelectorAll('#editCompMappingGrid select[data-item]').forEach(sel => {
+        const cid = sel.value;
+        if (!cid) { unassigned++; return; }
+        if (!counts[cid]) {
+            const comp = _editCompetencies.find(c => String(c.id) === cid);
+            counts[cid] = { label: comp ? (comp.code || comp.description.substring(0, 40)) : cid, items: [] };
+        }
+        counts[cid].items.push(+sel.dataset.item);
+    });
+
+    const rows = Object.values(counts).map(c =>
+        `<div class="comp-summary-row">
+            <span class="comp-summary-badge">${escHtml(c.label)}</span>
+            <span class="text-muted">items ${c.items.join(',')} <em>(${c.items.length})</em></span>
+        </div>`
+    ).join('');
+
+    const warn = unassigned > 0
+        ? `<div class="comp-unassigned-warn">⚠ ${unassigned} item${unassigned > 1 ? 's' : ''} unassigned</div>`
+        : `<div style="color:var(--c-success);font-size:.8rem">✓ All items mapped</div>`;
+
+    summary.innerHTML = rows + warn;
+}
+
+async function saveEditAsmt() {
+    const errEl = document.getElementById('editAsmtErr');
+    errEl.textContent = '';
+
+    const title = document.getElementById('editTitle').value.trim();
+    const termId = document.getElementById('editTerm').value;
+    if (!title)  { errEl.textContent = 'Title is required.'; return; }
+    if (!termId) { errEl.textContent = 'Term is required.'; return; }
+
+    // Collect current mapping
+    const itemCompMap = {};
+    document.querySelectorAll('#editCompMappingGrid select[data-item]').forEach(sel => {
+        if (sel.value) itemCompMap[+sel.dataset.item] = +sel.value;
+    });
+
+    const payload = {
+        assessment_id:      _editAsmtId,
+        title,
+        term_id:            +termId,
+        date_given:         document.getElementById('editDate').value || null,
+        item_competency_map: itemCompMap,
+    };
+
+    // Include destructive fields only when not locked
+    if (!_editHasData) {
+        payload.type        = document.getElementById('editType').value;
+        payload.total_items = +document.getElementById('editTotalItems').value;
+    }
+
+    const btn = document.getElementById('btnSaveEdit');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    const r = await apiPost('api/admin_update_assessment.php', payload);
+    btn.disabled = false; btn.textContent = 'Save Changes';
+
+    if (r.error) { errEl.textContent = r.error; return; }
+
+    showToast('Assessment updated.');
+    closeEditAsmtModal();
+    loadAdminAssessments();
+}
+
+function closeEditAsmtModal() {
+    document.getElementById('editAsmtModal').style.display = 'none';
+    document.getElementById('editType').disabled      = false;
+    document.getElementById('editTotalItems').disabled = false;
+}
+
+// ============================================================
+// ADMIN: DELETE ASSESSMENT MODAL (with blast radius)
+// ============================================================
+
+async function openDeleteAsmtModal(id) {
+    _deleteAsmtId = null;
+    document.getElementById('deleteAsmtErr').textContent = '';
+    document.getElementById('deleteAsmtInfo').innerHTML  = '<p class="text-muted">Loading…</p>';
+    document.getElementById('deleteAsmtConfirmBox').style.display = 'none';
+    document.getElementById('deleteConfirmInput').value  = '';
+    document.getElementById('btnConfirmDelete').disabled = false;
+    document.getElementById('deleteAsmtModal').style.display = '';
+
+    const r = await apiPost('api/admin_delete_assessment.php', { assessment_id: id, action: 'info' });
+    if (r.error) {
+        document.getElementById('deleteAsmtInfo').innerHTML = `<p class="alert alert-warning">${escHtml(r.error)}</p>`;
+        return;
+    }
+
+    _deleteAsmtId = id;
+    const br      = r.blast_radius;
+    const hasData = br.has_data;
+
+    let html = `<p>Delete <strong>${escHtml(r.title)}</strong>?</p>`;
+    if (hasData) {
+        html += `<div class="blast-radius-box">
+            <strong>⚠ Permanent data loss:</strong><br>
+            Encoded data from <strong>${br.sections} section(s)</strong> and
+            <strong>${br.teachers} teacher(s)</strong>
+            (${br.students} student score${br.students !== 1 ? 's' : ''}) will be permanently erased.
+        </div>`;
+        document.getElementById('btnConfirmDelete').disabled = true;
+        document.getElementById('deleteAsmtConfirmBox').style.display = '';
+    } else {
+        html += `<p class="text-muted" style="margin-top:.5rem">No encoded data. This assessment has no MPS or Item Analysis data yet — safe to delete.</p>`;
+    }
+    document.getElementById('deleteAsmtInfo').innerHTML = html;
+}
+
+async function confirmDeleteAsmtById() {
+    if (!_deleteAsmtId) return;
+    const errEl = document.getElementById('deleteAsmtErr');
+    errEl.textContent = '';
+
+    const btn = document.getElementById('btnConfirmDelete');
+    btn.disabled = true; btn.textContent = 'Deleting…';
+
+    const r = await apiPost('api/admin_delete_assessment.php', {
+        assessment_id: _deleteAsmtId,
+        action: 'delete',
+    });
+
+    btn.disabled = false; btn.textContent = '🗑 Delete';
+
+    if (r.error) { errEl.textContent = r.error; return; }
+
+    showToast('Assessment deleted.');
+    document.getElementById('asmtRow' + _deleteAsmtId)?.remove();
+    closeDeleteAsmtModal();
+    refreshDashboard();
+}
+
+function closeDeleteAsmtModal() {
+    document.getElementById('deleteAsmtModal').style.display = 'none';
+    _deleteAsmtId = null;
 }
