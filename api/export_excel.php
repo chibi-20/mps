@@ -26,16 +26,25 @@ $stmt = $pdo->prepare(
      FROM assessments a
      JOIN subjects s ON s.id = a.subject_id
      JOIN terms t ON t.id = a.term_id
-     JOIN users u ON u.id = a.teacher_id
+     LEFT JOIN users u ON u.id = a.teacher_id
      WHERE a.id = ?"
 );
 $stmt->execute([$assessment_id]);
 $asmt = $stmt->fetch();
 if (!$asmt) { http_response_code(404); exit('Assessment not found.'); }
-if ($role === 'teacher' && (int)$asmt['teacher_id'] !== $uid) { http_response_code(403); exit('Access denied.'); }
+$isShared = (bool)($asmt['is_shared'] ?? false);
+if ($role === 'teacher') {
+    if ($isShared) {
+        $taeCheck = $pdo->prepare("SELECT id FROM teacher_assessment_encodings WHERE assessment_id=? AND teacher_id=?");
+        $taeCheck->execute([$assessment_id, $uid]);
+        if (!$taeCheck->fetch()) { http_response_code(403); exit('Access denied.'); }
+    } elseif ((int)$asmt['teacher_id'] !== $uid) {
+        http_response_code(403); exit('Access denied.');
+    }
+}
 
 $totalItems  = (int)$asmt['total_items'];
-$teacherName = 'MR./MS. ' . display_name($asmt);
+$teacherName = $asmt['last_name'] ? 'MR./MS. ' . display_name($asmt) : 'Admin-Created Assessment';
 
 // Sections for this assessment (stored in assessment_sections at creation time)
 $secStmt = $pdo->prepare(
@@ -393,6 +402,104 @@ $nextRow2++;
 
 foreach (range(1, $itemLastCol) as $ci) {
     $sheet2->getColumnDimensionByColumn($ci)->setAutoSize(true);
+}
+
+// ============================================================
+// SHEET 3: COMPETENCY ANALYSIS
+// ============================================================
+$compMapStmt = $pdo->prepare(
+    "SELECT aic.item_no, c.id AS competency_id, c.code, c.description
+     FROM assessment_item_competencies aic
+     JOIN competencies c ON c.id = aic.competency_id
+     WHERE aic.assessment_id = ?
+     ORDER BY aic.item_no"
+);
+$compMapStmt->execute([$assessment_id]);
+$compMapRows = $compMapStmt->fetchAll();
+
+if (!empty($compMapRows)) {
+    $sheet3 = $ss->createSheet();
+    $sheet3->setTitle('COMPETENCY ANALYSIS');
+
+    $compLastCol = 3 + count($sections) + 1;  // Code+Desc+Items + sections + Total
+    $cr = writeDepEdHeader($sheet3, $compLastCol);
+    $cr++;
+    $sheet3->setCellValue("A{$cr}", 'Subject:');
+    $sheet3->setCellValue("B{$cr}", strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
+    $cr++;
+    $sheet3->setCellValue("A{$cr}", 'Test Title:');
+    $sheet3->setCellValue("B{$cr}", strtoupper($asmt['title']));
+    $cr += 2;
+
+    // Header
+    $hrC = $cr;
+    $col = 1;
+    $sheet3->setCellValueByColumnAndRow($col++, $hrC, 'Code');
+    $sheet3->setCellValueByColumnAndRow($col++, $hrC, 'Learning Competency');
+    $sheet3->setCellValueByColumnAndRow($col++, $hrC, 'Items');
+    foreach ($sections as $sec) {
+        $sheet3->setCellValueByColumnAndRow($col++, $hrC, $sec['name'] . ' %');
+    }
+    $sheet3->setCellValueByColumnAndRow($col, $hrC, 'Overall %');
+
+    $hdrRange = 'A' . $hrC . ':' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($compLastCol) . $hrC;
+    $sheet3->getStyle($hdrRange)->getFont()->setBold(true);
+    $sheet3->getStyle($hdrRange)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFD6E4F0');
+    $cr++;
+
+    // Group items by competency
+    $byComp = [];  // competency_id → {code, description, items[]}
+    foreach ($compMapRows as $r) {
+        $cid = (int)$r['competency_id'];
+        if (!isset($byComp[$cid])) {
+            $byComp[$cid] = ['code' => $r['code'] ?? '', 'description' => $r['description'], 'items' => []];
+        }
+        $byComp[$cid]['items'][] = (int)$r['item_no'];
+    }
+
+    // Write one row per competency
+    foreach ($byComp as $cid => $cdata) {
+        $col = 1;
+        sort($cdata['items']);
+        $itemsLabel = implode(',', $cdata['items']);
+
+        // % per section
+        $secPcts   = [];
+        $totCorr   = 0;
+        $totCases  = 0;
+        foreach ($sections as $sec) {
+            $secCorr  = 0;
+            $secCases = $sectionCases[$sec['id']] ?? 0;
+            foreach ($cdata['items'] as $ino) {
+                $secCorr += $icc[$sec['id']][$ino] ?? 0;
+            }
+            $pctSec = $secCases > 0 ? round($secCorr / $secCases * 100, 2) : '—';
+            $secPcts[] = $pctSec;
+            if (is_numeric($pctSec)) { $totCorr += $secCorr; $totCases += $secCases; }
+        }
+        $overallPct = $totCases > 0 ? round($totCorr / $totCases * 100, 2) : '—';
+
+        $sheet3->setCellValueByColumnAndRow($col++, $cr, $cdata['code']);
+        $sheet3->setCellValueByColumnAndRow($col++, $cr, $cdata['description']);
+        $sheet3->setCellValueByColumnAndRow($col++, $cr, $itemsLabel);
+        foreach ($secPcts as $sp) {
+            $sheet3->setCellValueByColumnAndRow($col++, $cr, $sp);
+        }
+        $sheet3->setCellValueByColumnAndRow($col, $cr, $overallPct);
+
+        // Color-code overall %
+        if (is_numeric($overallPct)) {
+            $clrArg = $overallPct >= 75 ? 'FF90EE90' : ($overallPct >= 50 ? 'FFFFD966' : 'FFFF9999');
+            $colLtr = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
+            $sheet3->getStyle("{$colLtr}{$cr}")->getFill()
+                ->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB($clrArg);
+        }
+        $cr++;
+    }
+
+    foreach (range(1, $compLastCol) as $ci) {
+        $sheet3->getColumnDimensionByColumn($ci)->setAutoSize(true);
+    }
 }
 
 // ---- Output ----

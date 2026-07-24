@@ -46,20 +46,41 @@ if ($syId) {
     $terms = [];
 }
 
-// Load assessments for this teacher (include section count for sidebar display)
+// Legacy assessments (teacher-created)
 $aStmt = $pdo->prepare(
     "SELECT a.id, a.title, a.type, a.total_items, a.date_given, a.status, a.remarks,
             a.subject_id, s.name AS subject_name, s.grade_level,
-            t.term_no, t.name AS term_name,
-            (SELECT COUNT(*) FROM assessment_sections WHERE assessment_id = a.id) AS section_count
+            t.term_no, t.name AS term_name, 0 AS is_shared,
+            (SELECT COUNT(*) FROM assessment_sections WHERE assessment_id = a.id) AS section_count,
+            a.updated_at AS sort_ts
      FROM assessments a
      JOIN subjects s ON s.id = a.subject_id
      JOIN terms t ON t.id = a.term_id
-     WHERE a.teacher_id = ?
+     WHERE a.teacher_id = ? AND COALESCE(a.is_shared, 0) = 0
      ORDER BY a.updated_at DESC"
 );
 $aStmt->execute([$uid]);
-$myAssessments = $aStmt->fetchAll();
+$legacyAssessments = $aStmt->fetchAll();
+
+// Shared assessments the teacher has started encoding
+$sharedStmt = $pdo->prepare(
+    "SELECT a.id, a.title, a.type, a.total_items, a.date_given, tae.status, tae.remarks,
+            a.subject_id, s.name AS subject_name, s.grade_level,
+            t.term_no, t.name AS term_name, 1 AS is_shared,
+            (SELECT COUNT(*) FROM assessment_sections WHERE assessment_id = a.id) AS section_count,
+            tae.updated_at AS sort_ts
+     FROM assessments a
+     JOIN subjects s ON s.id = a.subject_id
+     JOIN terms t ON t.id = a.term_id
+     JOIN teacher_assessment_encodings tae ON tae.assessment_id = a.id AND tae.teacher_id = ?
+     WHERE a.is_shared = 1
+     ORDER BY tae.updated_at DESC"
+);
+$sharedStmt->execute([$uid]);
+$sharedAssessments = $sharedStmt->fetchAll();
+
+$myAssessments = [...$legacyAssessments, ...$sharedAssessments];
+usort($myAssessments, fn($a, $b) => strcmp($b['sort_ts'] ?? '', $a['sort_ts'] ?? ''));
 
 $csrf = csrf_token();
 ?>
@@ -105,11 +126,13 @@ $csrf = csrf_token();
     <?php foreach ($myAssessments as $a): ?>
         <div class="assessment-item <?= $a['status'] === 'returned' ? 'returned' : '' ?>"
              data-id="<?= $a['id'] ?>"
+             data-shared="<?= (int)($a['is_shared'] ?? 0) ?>"
              onclick="loadAssessment(<?= $a['id'] ?>)">
             <div class="ai-title"><?= h($a['title']) ?></div>
             <div class="ai-meta">
                 <?= h($a['subject_name']) ?> G<?= $a['grade_level'] ?> &middot;
                 Term <?= $a['term_no'] ?> &middot; <?= $a['total_items'] ?> items
+                <?php if ($a['is_shared'] ?? 0): ?><span class="badge-shared">Admin</span><?php endif; ?>
             </div>
             <span class="status-chip status-<?= $a['status'] ?>"><?= ucfirst($a['status']) ?></span>
             <?php if ($a['status'] === 'returned' && $a['remarks']): ?>
@@ -119,7 +142,7 @@ $csrf = csrf_token();
                 <span class="ai-sec-count">
                     <?= $a['section_count'] ?> section<?= $a['section_count'] == 1 ? '' : 's' ?>
                 </span>
-                <?php if ($a['status'] === 'draft'): ?>
+                <?php if ($a['status'] === 'draft' && !($a['is_shared'] ?? 0)): ?>
                 <button class="btn-del-draft"
                         onclick="deleteAssessment(<?= $a['id'] ?>, <?= h(json_encode($a['title'])) ?>, event)"
                         title="Delete this draft">&#x1F5D1; Delete</button>
@@ -138,79 +161,28 @@ $csrf = csrf_token();
 ============================================================ -->
 <main class="main-content">
 
-    <!-- New Assessment Form (hidden by default) -->
+    <!-- Select Assessment Panel (replaces old Create form) -->
     <div id="newAssessmentPanel" class="card" style="display:none">
-        <h3 class="card-title">Create New Assessment</h3>
-        <form id="frmNewAssessment">
-            <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Subject</label>
-                    <?php if (empty($mySubjects)): ?>
-                    <div class="alert alert-warning" style="margin:0;padding:0.5rem 0.75rem;font-size:0.85rem">
-                        No subjects assigned — contact admin or re-register with subjects checked.
-                    </div>
-                    <select name="subject_id" id="selSubject" required disabled>
-                        <option value="">— no subjects —</option>
-                    </select>
-                    <?php else: ?>
-                    <select name="subject_id" id="selSubject" required>
-                        <option value="">— select subject —</option>
-                        <?php foreach ($mySubjects as $s): ?>
-                        <option value="<?= $s['id'] ?>">
-                            <?= h($s['name']) ?> (Grade <?= $s['grade_level'] ?>)
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <?php endif; ?>
-                </div>
-                <div class="form-group">
-                    <label>Term</label>
-                    <select name="term_id" required>
-                        <option value="">— select —</option>
-                        <?php foreach ($terms as $t): ?>
-                        <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Type</label>
-                    <select name="type" required>
-                        <option value="summative">Summative</option>
-                        <option value="periodic" selected>Periodic</option>
-                        <option value="term_exam">Term Exam</option>
-                    </select>
-                </div>
-            </div>
+        <h3 class="card-title">Select Assessment to Encode</h3>
+        <p class="text-muted" style="font-size:.88rem;margin-bottom:1rem">
+            Assessments are created by the admin. Select one below to start entering your sections' MPS and Item Analysis data.
+        </p>
 
-            <!-- Section checklist — populated dynamically when subject is selected -->
-            <div id="sectionChecklistWrap" class="form-group" style="display:none">
-                <label>Sections <span class="req">*</span>
-                    <small class="text-muted" id="sectionCountHint"></small>
-                </label>
-                <div id="sectionChecklist">
-                    <p class="text-muted" style="margin:0">Select a subject above to load sections.</p>
-                </div>
+        <div id="selectAsmtList" class="select-asmt-list">
+            <p class="text-muted">Loading available assessments…</p>
+        </div>
+
+        <!-- Section checklist (shown after selecting an assessment) -->
+        <div id="selectAsmtSections" style="display:none">
+            <h4 style="margin:.75rem 0 .4rem;font-size:.9rem;color:var(--maroon)">
+                Your Sections for <span id="selectAsmtName"></span>
+            </h4>
+            <div id="selectSectionChecklist" class="checklist checklist--grid"></div>
+            <div class="form-actions" style="margin-top:.75rem">
+                <button class="btn btn-primary" onclick="startEncoding()">Start Encoding</button>
+                <button class="btn btn-outline" onclick="clearAsmtSelection()">← Back</button>
             </div>
-            <div class="form-row">
-                <div class="form-group" style="flex:2">
-                    <label>Assessment Title</label>
-                    <input type="text" name="title" placeholder="e.g. First Periodic Examination" required>
-                </div>
-                <div class="form-group">
-                    <label>Total Items</label>
-                    <input type="number" name="total_items" min="1" max="200" required>
-                </div>
-                <div class="form-group">
-                    <label>Date Given</label>
-                    <input type="date" name="date_given">
-                </div>
-            </div>
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Create Assessment</button>
-                <button type="button" class="btn btn-outline" onclick="toggleNewForm(false)">Cancel</button>
-            </div>
-        </form>
+        </div>
     </div>
 
     <!-- Assessment Detail -->
@@ -348,6 +320,7 @@ const BAND_KEYS          = <?= json_encode(array_keys(MASTERY_BANDS)) ?>;
 const AVAILABLE_SECTIONS = {}; // populated per assessment
 let currentAssessmentId  = null;
 let miniChart            = null;
+let selectedSharedAsmtId = null;
 </script>
 <script src="<?= BASE_URL ?>script.js"></script>
 </body>

@@ -19,7 +19,8 @@ if ($activeSYId) {
     $terms = [];
 }
 
-$subjects  = $pdo->query("SELECT DISTINCT name FROM subjects ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+$subjects    = $pdo->query("SELECT DISTINCT name FROM subjects ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+$subjectsAll = $pdo->query("SELECT id, name, grade_level FROM subjects ORDER BY grade_level, name")->fetchAll();
 $gradeLevels = [9, 10];  // grades with sections
 ?>
 <!DOCTYPE html>
@@ -48,10 +49,13 @@ $gradeLevels = [9, 10];  // grades with sections
 
 <!-- Tab Navigation -->
 <div class="admin-tabs">
-    <button class="admin-tab active" data-panel="analytics"    onclick="adminTab(this,'analytics')">Analytics</button>
-    <button class="admin-tab" data-panel="submissions"         onclick="adminTab(this,'submissions')">Submissions</button>
-    <button class="admin-tab" data-panel="teachers"            onclick="adminTab(this,'teachers')">Teacher Accounts</button>
-    <button class="admin-tab" data-panel="assignments"         onclick="adminTab(this,'assignments')">Section Assignments</button>
+    <button class="admin-tab active" data-panel="analytics"     onclick="adminTab(this,'analytics')">Analytics</button>
+    <button class="admin-tab" data-panel="submissions"          onclick="adminTab(this,'submissions')">Submissions</button>
+    <button class="admin-tab" data-panel="competencies"         onclick="adminTab(this,'competencies')">Learning Competencies</button>
+    <button class="admin-tab" data-panel="teachers"             onclick="adminTab(this,'teachers')">Teacher Accounts</button>
+    <button class="admin-tab" data-panel="assignments"          onclick="adminTab(this,'assignments')">Section Assignments</button>
+    <button class="btn btn-import" style="margin-left:auto;align-self:center;margin-right:.75rem"
+            onclick="openCreateAsmtModal()">+ Create Assessment</button>
 </div>
 
 <!-- ============================================================
@@ -157,6 +161,15 @@ $gradeLevels = [9, 10];  // grades with sections
             <h4 class="card-title">MPS Trend Across Assessments</h4>
             <canvas id="chartMpsTrend"></canvas>
         </div>
+    </div>
+
+    <!-- Least-Mastered Competencies -->
+    <div class="card" id="compChartCard" style="display:none">
+        <h4 class="card-title">Least-Mastered Learning Competencies
+            <small class="text-muted">(items with competency mapping only)</small>
+        </h4>
+        <canvas id="chartCompetency" height="220"></canvas>
+        <div id="compDrillTable" class="table-scroll" style="margin-top:1rem"></div>
     </div>
 
     <!-- Item % Heatmap (HTML table) -->
@@ -270,6 +283,205 @@ $gradeLevels = [9, 10];  // grades with sections
     </div>
 </div>
 
+<!-- ============================================================
+     PANEL: LEARNING COMPETENCIES
+============================================================ -->
+<div id="panel-competencies" class="admin-panel" style="display:none">
+    <div class="card">
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+            <h3 class="card-title" style="margin:0">Learning Competencies</h3>
+            <select id="compSubjectFilter" onchange="loadCompetencies()" style="min-width:180px">
+                <option value="">— Select Subject —</option>
+                <?php foreach ($subjectsAll as $s): ?>
+                <option value="<?= $s['id'] ?>" data-grade="<?= $s['grade_level'] ?>">
+                    <?= h($s['name']) ?> (G<?= $s['grade_level'] ?>)
+                </option>
+                <?php endforeach; ?>
+            </select>
+            <select id="compTermFilter" onchange="loadCompetencies()" style="min-width:140px">
+                <option value="">All Terms</option>
+                <?php foreach ($terms as $t): ?>
+                <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <button class="btn btn-sm btn-outline" onclick="openCompCsvModal()">&#x2B06; Bulk Import CSV</button>
+        </div>
+
+        <div id="compEmptyMsg" class="text-muted" style="padding:.5rem 0">
+            Select a subject above to view or add competencies.
+        </div>
+
+        <div id="compTableWrap" style="display:none">
+            <div class="table-scroll">
+                <table class="data-table" id="compTable">
+                    <thead><tr><th style="width:120px">Code</th><th>Description</th><th style="width:90px">Actions</th></tr></thead>
+                    <tbody id="compTbody"></tbody>
+                </table>
+            </div>
+            <div class="comp-add-row">
+                <h4 style="margin:1rem 0 .5rem;font-size:.9rem;color:var(--maroon)">Add Competency</h4>
+                <div class="form-row" style="align-items:flex-end">
+                    <div class="form-group" style="max-width:160px">
+                        <label>Code <small class="text-muted">(optional)</small></label>
+                        <input type="text" id="newCompCode" placeholder="e.g. AP10-KIH-Ia-1" maxlength="60">
+                    </div>
+                    <div class="form-group" style="flex:3">
+                        <label>Description <span class="req">*</span></label>
+                        <input type="text" id="newCompDesc" placeholder="Learning competency description" maxlength="500">
+                    </div>
+                    <div class="form-group" style="flex:none">
+                        <button class="btn btn-primary btn-sm" onclick="adminAddCompetency()">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: BULK CSV IMPORT (competencies)
+============================================================ -->
+<div id="compCsvModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeCompCsvModal()">
+    <div class="modal-box modal-box--wide">
+        <h3>Bulk Import Competencies via CSV</h3>
+        <p class="text-muted" style="font-size:.85rem;margin-bottom:.75rem">
+            One competency per line. Two columns (comma-separated): <code>Code, Description</code>.
+            Code is optional — paste a single column for description-only import.
+        </p>
+        <textarea id="compCsvText" rows="10" placeholder="AP10-KIH-Ia-1, The student explains the political causes of the First World War&#10;AP10-KIH-Ia-2, The student analyzes the role of imperialism in WW1" style="width:100%;font-family:monospace;font-size:.82rem"></textarea>
+        <div id="compCsvResult" style="margin-top:.5rem;font-size:.85rem"></div>
+        <div class="form-actions" style="margin-top:1rem">
+            <button class="btn btn-primary" onclick="doCompCsvImport()">Import</button>
+            <button class="btn btn-outline" onclick="closeCompCsvModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: CREATE ASSESSMENT (4-step)
+============================================================ -->
+<div id="createAsmtModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeCreateAsmtModal()">
+    <div class="modal-box modal-box--wide">
+
+        <!-- Step indicator -->
+        <div class="step-indicator">
+            <div class="step-dot" id="stepDot1">1</div>
+            <div class="step-line"></div>
+            <div class="step-dot" id="stepDot2">2</div>
+            <div class="step-line"></div>
+            <div class="step-dot" id="stepDot3">3</div>
+            <div class="step-line"></div>
+            <div class="step-dot" id="stepDot4">4</div>
+        </div>
+        <div class="step-label-row">
+            <span>Type</span><span>Scope</span><span>Competencies</span><span>Review</span>
+        </div>
+
+        <!-- Step 1: Type -->
+        <div id="createStep1">
+            <h3 style="margin-bottom:1rem;color:var(--maroon-dark)">Step 1 — Assessment Type</h3>
+            <div class="type-card-row">
+                <div class="type-card" id="typeCardSummative" onclick="selectAsmtType('summative',25)">
+                    <div class="type-card-icon">📝</div>
+                    <div class="type-card-name">Summative Test</div>
+                    <div class="type-card-meta">Default: 25 items</div>
+                </div>
+                <div class="type-card" id="typeCardTerm_exam" onclick="selectAsmtType('term_exam',50)">
+                    <div class="type-card-icon">📋</div>
+                    <div class="type-card-name">Term Exam</div>
+                    <div class="type-card-meta">Default: 50 items</div>
+                </div>
+            </div>
+            <div class="form-group" style="max-width:200px;margin-top:1rem">
+                <label>Total Items <small class="text-muted">(override if needed)</small></label>
+                <input type="number" id="asmtTotalItems" min="1" max="200" value="25">
+            </div>
+        </div>
+
+        <!-- Step 2: Scope -->
+        <div id="createStep2" style="display:none">
+            <h3 style="margin-bottom:1rem;color:var(--maroon-dark)">Step 2 — Scope</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>School Year <span class="req">*</span></label>
+                    <select id="asmtSY" onchange="loadTermsForModal()">
+                        <?php foreach ($schoolYears as $sy): ?>
+                        <option value="<?= $sy['id'] ?>" <?= $sy['id'] == $activeSYId ? 'selected' : '' ?>>
+                            SY <?= h($sy['name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Term <span class="req">*</span></label>
+                    <select id="asmtTerm">
+                        <option value="">— select —</option>
+                        <?php foreach ($terms as $t): ?>
+                        <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Subject <span class="req">*</span></label>
+                <select id="asmtSubject">
+                    <option value="">— select subject —</option>
+                    <?php foreach ($subjectsAll as $s): ?>
+                    <option value="<?= $s['id'] ?>"><?= h($s['name']) ?> (Grade <?= $s['grade_level'] ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex:3">
+                    <label>Assessment Title <span class="req">*</span></label>
+                    <input type="text" id="asmtTitle" placeholder="e.g. 1st Summative Test" maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label>Date Given</label>
+                    <input type="date" id="asmtDate">
+                </div>
+            </div>
+        </div>
+
+        <!-- Step 3: Competency Mapping -->
+        <div id="createStep3" style="display:none">
+            <h3 style="margin-bottom:.5rem;color:var(--maroon-dark)">Step 3 — Competency Mapping</h3>
+            <p class="text-muted" style="font-size:.84rem;margin-bottom:1rem">
+                Map each item to the learning competency it measures. Items may be left unassigned.
+            </p>
+
+            <!-- Bulk assign tool -->
+            <div class="bulk-assign-bar">
+                <label>Bulk assign:</label>
+                <select id="bulkCompSel" style="flex:2"></select>
+                <span style="white-space:nowrap">to items</span>
+                <input type="number" id="bulkFrom" min="1" style="width:60px" placeholder="1">
+                <span>–</span>
+                <input type="number" id="bulkTo"   min="1" style="width:60px" placeholder="5">
+                <button class="btn btn-sm btn-outline" onclick="applyBulkAssign()">Apply</button>
+            </div>
+
+            <div id="compMappingGrid" style="max-height:340px;overflow-y:auto;margin-top:.75rem"></div>
+            <div id="compMappingSummary" class="comp-summary" style="margin-top:.75rem"></div>
+        </div>
+
+        <!-- Step 4: Review -->
+        <div id="createStep4" style="display:none">
+            <h3 style="margin-bottom:1rem;color:var(--maroon-dark)">Step 4 — Review &amp; Create</h3>
+            <div id="asmtReviewContent"></div>
+        </div>
+
+        <!-- Navigation buttons -->
+        <div class="form-actions" style="margin-top:1.5rem;border-top:1px solid var(--c-border);padding-top:1rem">
+            <button id="btnCreatePrev" class="btn btn-outline" onclick="createAsmtPrev()" style="display:none">← Back</button>
+            <span id="createAsmtErr" class="text-muted" style="font-size:.85rem;flex:1"></span>
+            <button id="btnCreateNext" class="btn btn-primary" onclick="createAsmtNext()">Next →</button>
+            <button id="btnCreateDone" class="btn btn-submit-final" onclick="doCreateAssessment()" style="display:none">&#x2713; Create Assessment</button>
+            <button class="btn btn-outline" onclick="closeCreateAsmtModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
 <script>
 const BASE_URL        = <?= json_encode(BASE_URL) ?>;
 const CSRF_TOKEN      = <?= json_encode($csrf) ?>;
@@ -279,6 +491,7 @@ const BAND_COLORS     = {
     M:'#1a7a4a', CAM:'#52b788', MTM:'#95d5b2',
     AVR:'#ffd166', LM:'#ef8c44', VLM:'#e55934', ANM:'#9d0208'
 };
+const SUBJECTS_ALL    = <?= json_encode($subjectsAll) ?>;
 </script>
 <script src="<?= BASE_URL ?>script.js"></script>
 </body>

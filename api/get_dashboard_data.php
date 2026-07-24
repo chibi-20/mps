@@ -48,15 +48,16 @@ $assessments = $asmtStmt->fetchAll();
 
 if (empty($assessments)) {
     json_response([
-        'mps_per_section'     => [],
-        'mps_per_grade'       => [],
-        'mps_per_subject'     => [],
-        'mastery_distribution'=> [],
-        'least_mastered_items'=> [],
-        'item_heatmap'        => ['sections'=>[],'items'=>[],'data'=>[]],
-        'mps_trend'           => [],
-        'npwrm_per_section'   => [],
-        'kpis'                => ['overall_mps'=>0,'total_examinees'=>0,'submitted_count'=>0,'below50_items'=>0],
+        'mps_per_section'              => [],
+        'mps_per_grade'                => [],
+        'mps_per_subject'              => [],
+        'mastery_distribution'         => [],
+        'least_mastered_items'         => [],
+        'least_mastered_competencies'  => [],
+        'item_heatmap'                 => ['sections'=>[],'items'=>[],'data'=>[]],
+        'mps_trend'                    => [],
+        'npwrm_per_section'            => [],
+        'kpis'                         => ['overall_mps'=>0,'total_examinees'=>0,'submitted_count'=>0,'below50_items'=>0],
     ]);
 }
 
@@ -199,7 +200,7 @@ usort($mpsPerGrade, fn($a, $b) => $a['grade_level'] <=> $b['grade_level']);
 
 // ---- Item Analysis ----
 $iccStmt = $pdo->prepare(
-    "SELECT icc.section_id, icc.item_no, icc.correct_count,
+    "SELECT icc.assessment_id, icc.section_id, icc.item_no, icc.correct_count,
             sec.name AS section_name
      FROM item_correct_counts icc
      JOIN sections sec ON sec.id = icc.section_id
@@ -291,20 +292,74 @@ for ($i = 1; $i <= $maxItem; $i++) {
     if ($tcases > 0 && $pct < 50) $below50++;
 }
 
+// ---- Competency Analysis ----
+$aicStmt = $pdo->prepare(
+    "SELECT aic.assessment_id, aic.item_no, aic.competency_id, c.code, c.description
+     FROM assessment_item_competencies aic
+     JOIN competencies c ON c.id = aic.competency_id
+     WHERE aic.assessment_id IN ({$in})"
+);
+$aicStmt->execute($asmtIds);
+$aicRows = $aicStmt->fetchAll();
+
+// Build (assessment_id, item_no) → competency_id lookup
+$itemCompLookup = [];  // [aId][item_no] = competency_id
+$compInfo       = [];  // competency_id → {code, description}
+foreach ($aicRows as $r) {
+    $itemCompLookup[$r['assessment_id']][$r['item_no']] = (int)$r['competency_id'];
+    $compInfo[$r['competency_id']] = ['code' => $r['code'], 'description' => $r['description']];
+}
+
+// Aggregate correct counts and cases per competency
+$compStats = [];  // competency_id → {total_correct, total_possible, section_ids}
+foreach ($iccRows as $r) {
+    $aId  = (int)$r['assessment_id'];
+    $ino  = (int)$r['item_no'];
+    $sid  = (int)$r['section_id'];
+    $comp = $itemCompLookup[$aId][$ino] ?? null;
+    if ($comp === null) continue;
+
+    if (!isset($compStats[$comp])) {
+        $compStats[$comp] = ['total_correct' => 0, 'total_possible' => 0, 'section_ids' => []];
+    }
+    $compStats[$comp]['total_correct']    += (int)$r['correct_count'];
+    $compStats[$comp]['total_possible']   += $casesBySec[$sid] ?? 0;
+    $compStats[$comp]['section_ids'][$sid] = true;
+}
+
+$leastMasteredCompetencies = [];
+foreach ($compStats as $compId => $cs) {
+    $pctComp = $cs['total_possible'] > 0
+        ? round($cs['total_correct'] / $cs['total_possible'] * 100, 2)
+        : 0;
+    $info = $compInfo[$compId] ?? ['code' => '', 'description' => 'Unknown'];
+    $leastMasteredCompetencies[] = [
+        'competency_id'  => (int)$compId,
+        'code'           => $info['code'] ?? '',
+        'description'    => $info['description'],
+        'pct'            => $pctComp,
+        'total_correct'  => $cs['total_correct'],
+        'total_possible' => $cs['total_possible'],
+        'section_count'  => count($cs['section_ids']),
+    ];
+}
+usort($leastMasteredCompetencies, fn($a, $b) => $a['pct'] <=> $b['pct']);
+
 json_response([
-    'mps_per_section'      => $mpsPerSection,
-    'mps_per_grade'        => $mpsPerGrade,
-    'mps_per_subject'      => $mpsPerSubject,
-    'mastery_distribution' => $masteryDistribution,
-    'least_mastered_items' => $leastMastered,
-    'item_heatmap'         => [
+    'mps_per_section'              => $mpsPerSection,
+    'mps_per_grade'                => $mpsPerGrade,
+    'mps_per_subject'              => $mpsPerSubject,
+    'mastery_distribution'         => $masteryDistribution,
+    'least_mastered_items'         => $leastMastered,
+    'least_mastered_competencies'  => $leastMasteredCompetencies,
+    'item_heatmap'                 => [
         'sections' => $heatSecNames,
         'items'    => $heatItems,
         'data'     => $heatData,
     ],
-    'mps_trend'            => $mpsTrend,
-    'npwrm_per_section'    => $npwrmPerSection,
-    'kpis'                 => [
+    'mps_trend'                    => $mpsTrend,
+    'npwrm_per_section'            => $npwrmPerSection,
+    'kpis'                         => [
         'overall_mps'     => round($overallMps, 2),
         'total_examinees' => $totalExaminees,
         'submitted_count' => $submittedCount,

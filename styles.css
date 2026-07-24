@@ -504,3 +504,109 @@ input:focus, select:focus, textarea:focus {
     .assessment-header { flex-direction: column; }
     .filter-bar { flex-direction: column; align-items: stretch; }
 }
+
+/* ---- Admin tab bar "Create Assessment" button integration ---- */
+.admin-tabs { display: flex; flex-wrap: wrap; align-items: stretch; }
+
+/* ---- Badge for admin-created assessments in sidebar ---- */
+.badge-shared {
+    display: inline-block;
+    background: var(--gold-tint-strong);
+    color: var(--maroon-dark);
+    border: 1px solid var(--gold);
+    border-radius: 3px;
+    font-size: .65rem;
+    font-weight: 700;
+    padding: 0 .3rem;
+    vertical-align: middle;
+    margin-left: .25rem;
+}
+
+/* ---- Competency item table column ---- */
+.comp-col { font-size: .75rem; color: var(--c-muted); max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Competency management panel ---- */
+.comp-add-row { border-top: 1px solid var(--c-border); padding-top: .75rem; margin-top: .75rem; }
+
+/* ---- Create Assessment Modal — Step Indicator ---- */
+.step-indicator {
+    display: flex; align-items: center; gap: 0;
+    margin-bottom: .35rem;
+}
+.step-dot {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: var(--c-border);
+    color: var(--c-muted);
+    font-size: .8rem; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background .2s, color .2s;
+}
+.step-dot.active  { background: var(--maroon); color: #fff; }
+.step-dot.done    { background: var(--c-success); color: #fff; }
+.step-line { flex: 1; height: 2px; background: var(--c-border); }
+.step-label-row {
+    display: flex; justify-content: space-between;
+    font-size: .7rem; color: var(--c-muted);
+    margin-bottom: 1.25rem;
+}
+
+/* ---- Type selection cards ---- */
+.type-card-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.type-card {
+    flex: 1; min-width: 140px;
+    border: 2px solid var(--c-border);
+    border-radius: var(--radius);
+    padding: 1.25rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+.type-card:hover { border-color: var(--gold); background: var(--gold-tint); }
+.type-card.selected { border-color: var(--maroon); background: var(--maroon-tint); }
+.type-card-icon { font-size: 2rem; margin-bottom: .4rem; }
+.type-card-name { font-weight: 700; color: var(--maroon); }
+.type-card-meta { font-size: .78rem; color: var(--c-muted); margin-top: .2rem; }
+
+/* ---- Competency mapping grid ---- */
+.comp-map-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.comp-map-table th { background: var(--maroon-tint); color: var(--maroon); padding: .35rem .5rem; text-align: left; border-bottom: 2px solid var(--c-border); position: sticky; top: 0; }
+.comp-map-table td { padding: .3rem .5rem; border-bottom: 1px solid var(--c-border); vertical-align: middle; }
+.comp-map-table td:first-child { width: 60px; font-weight: 700; color: var(--c-muted); text-align: center; }
+.comp-map-table select { padding: .25rem .4rem; font-size: .82rem; }
+
+/* ---- Bulk assign bar ---- */
+.bulk-assign-bar {
+    display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+    background: var(--gold-tint); border: 1px solid var(--gold);
+    border-radius: var(--radius); padding: .5rem .75rem;
+    font-size: .84rem;
+}
+
+/* ---- Competency live summary ---- */
+.comp-summary { font-size: .82rem; }
+.comp-summary-row { display: flex; gap: .5rem; align-items: baseline; margin-bottom: .2rem; }
+.comp-summary-badge { background: var(--maroon-tint); color: var(--maroon); border-radius: 3px; padding: .05rem .35rem; font-size: .74rem; font-weight: 700; white-space: nowrap; }
+.comp-unassigned-warn { color: var(--c-warning); font-weight: 600; font-size: .8rem; margin-top: .4rem; }
+
+/* ---- Select assessment list ---- */
+.select-asmt-list { display: flex; flex-direction: column; gap: .5rem; max-height: 380px; overflow-y: auto; }
+.select-asmt-card {
+    border: 1.5px solid var(--c-border);
+    border-radius: var(--radius);
+    padding: .6rem .85rem;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+.select-asmt-card:hover { border-color: var(--gold); background: var(--gold-tint); }
+.select-asmt-card.active  { border-color: var(--maroon); background: var(--maroon-tint); }
+.select-asmt-card-title   { font-weight: 700; color: var(--maroon); }
+.select-asmt-card-meta    { font-size: .8rem; color: var(--c-muted); margin-top: .1rem; }
+.select-asmt-card-badge   { font-size: .72rem; color: var(--c-success); font-weight: 600; }
+
+/* ---- Competency drill-down table in dashboard ---- */
+#compDrillTable table { font-size: .82rem; }
+#compDrillTable .pct-red    { color: var(--c-danger);  font-weight: 700; }
+#compDrillTable .pct-yellow { color: var(--c-warning); font-weight: 700; }
+#compDrillTable .pct-green  { color: var(--c-success); font-weight: 700; }

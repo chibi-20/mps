@@ -695,6 +695,8 @@ function getBand(pct) {
 // ---- ITEM ANALYSIS TABLE ----
 function buildItemTable(data) {
     const { assessment: a, sections, item_correct_counts: icc } = data;
+    const compMap    = data.competency_map || {};
+    const hasCompMap = Object.keys(compMap).length > 0;
     const totalItems = +a.total_items;
     const locked = (a.status === 'submitted' || a.status === 'approved');
 
@@ -704,6 +706,12 @@ function buildItemTable(data) {
     const thead = tbl.createTHead();
     const r1 = thead.insertRow();
     const itTH = document.createElement('th'); itTH.textContent = 'Item'; itTH.rowSpan = 2; r1.appendChild(itTH);
+    if (hasCompMap) {
+        const cTH = document.createElement('th');
+        cTH.textContent = 'Competency'; cTH.rowSpan = 2;
+        cTH.style.cssText = 'max-width:140px;font-size:.78rem';
+        r1.appendChild(cTH);
+    }
     sections.forEach(s => { const th = document.createElement('th'); th.colSpan=2; th.textContent=s.name; r1.appendChild(th); });
     const totTH2 = document.createElement('th'); totTH2.colSpan=2; totTH2.textContent='TOTAL'; r1.appendChild(totTH2);
     const r2 = thead.insertRow();
@@ -716,6 +724,19 @@ function buildItemTable(data) {
         const tr = tbody.insertRow();
         tr.dataset.item = item;
         const td0 = tr.insertCell(); td0.textContent = item; td0.className = 'row-label';
+        if (hasCompMap) {
+            const comp = compMap[item];
+            const tdC  = tr.insertCell();
+            tdC.className = 'comp-col';
+            if (comp) {
+                const label = comp.code || comp.description.substring(0, 35) + (comp.description.length > 35 ? '…' : '');
+                tdC.textContent = label;
+                tdC.title = (comp.code ? comp.code + ' — ' : '') + comp.description;
+            } else {
+                tdC.textContent = '—';
+                tdC.style.color = 'var(--c-border)';
+            }
+        }
 
         sections.forEach(sec => {
             const savedF = icc[sec.id]?.[item] ?? 0;
@@ -961,6 +982,7 @@ async function refreshDashboard() {
     renderChart('chartLeastMastered',buildLeastMasteredChart(data));
     renderChart('chartMpsTrend',     buildMpsTrendChart(data));
     renderHeatmap(data.item_heatmap);
+    renderCompetencySection(data);
 }
 
 function renderKpis(kpis) {
@@ -1411,4 +1433,542 @@ document.addEventListener('DOMContentLoaded', () => {
         // Initial load
         updateFilterDependents().then(() => refreshDashboard());
     }
+
+    // Teacher dashboard: "+ New" button opens the select-assessment panel
+    const btnNew = document.getElementById('btnNewAssessment');
+    if (btnNew) {
+        btnNew.addEventListener('click', () => openSelectAsmtPanel());
+    }
 });
+
+// ============================================================
+// TEACHER: SELECT SHARED ASSESSMENT
+// ============================================================
+
+let _sharedAsmts = [];   // cached from API
+
+async function openSelectAsmtPanel() {
+    document.getElementById('assessmentDetail').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('newAssessmentPanel').style.display = 'block';
+
+    clearAsmtSelection();
+    const list = document.getElementById('selectAsmtList');
+    list.innerHTML = '<p class="text-muted">Loading…</p>';
+
+    const data = await apiGet('api/get_shared_assessments.php');
+    if (data.error) { list.innerHTML = `<p class="alert alert-warning">${escHtml(data.error)}</p>`; return; }
+
+    _sharedAsmts = data.assessments || [];
+    if (!_sharedAsmts.length) {
+        list.innerHTML = '<p class="text-muted">No assessments available yet. Ask your administrator to create assessments for your subjects.</p>';
+        return;
+    }
+    list.innerHTML = _sharedAsmts.map(a => `
+        <div class="select-asmt-card ${a.already_encoding ? 'active' : ''}" id="saCard${a.id}" onclick="selectSharedAsmt(${a.id})">
+            <div class="select-asmt-card-title">${escHtml(a.title)}</div>
+            <div class="select-asmt-card-meta">
+                ${escHtml(a.subject_name)} G${a.grade_level} &middot; Term ${a.term_no} &middot;
+                ${a.total_items} items &middot; SY ${escHtml(a.sy_name)}
+            </div>
+            ${a.already_encoding ? '<div class="select-asmt-card-badge">✓ Already encoding</div>' : ''}
+        </div>`).join('');
+}
+
+async function selectSharedAsmt(id) {
+    selectedSharedAsmtId = id;
+    document.querySelectorAll('.select-asmt-card').forEach(c => c.classList.remove('active'));
+    document.getElementById('saCard' + id)?.classList.add('active');
+
+    const asmt = _sharedAsmts.find(a => a.id == id);
+    if (!asmt) return;
+
+    document.getElementById('selectAsmtName').textContent = asmt.title;
+
+    // Load teacher's sections for this assessment's subject
+    const checklist = document.getElementById('selectSectionChecklist');
+    checklist.innerHTML = '<p class="text-muted">Loading sections…</p>';
+    document.getElementById('selectAsmtSections').style.display = 'block';
+
+    const data = await apiGet(`api/get_sections.php?subject_id=${asmt.subject_id}`);
+    if (data.error || !data.sections?.length) {
+        checklist.innerHTML = '<p class="alert alert-warning">No sections found for your assignment. Contact admin.</p>';
+        return;
+    }
+
+    const preChecked = new Set(data.checked || []);
+    checklist.innerHTML = data.sections.map(s =>
+        `<label class="check-item"><input type="checkbox" name="sel_sec" value="${s.id}"${preChecked.has(s.id) ? ' checked' : ''}>${escHtml(s.name)}</label>`
+    ).join('');
+}
+
+function clearAsmtSelection() {
+    selectedSharedAsmtId = null;
+    document.getElementById('selectAsmtSections').style.display = 'none';
+    document.getElementById('selectSectionChecklist').innerHTML = '';
+}
+
+async function startEncoding() {
+    if (!selectedSharedAsmtId) return;
+    const checked = [...document.querySelectorAll('#selectSectionChecklist input:checked')].map(cb => +cb.value);
+    if (!checked.length) { showToast('Select at least one section.', 'error'); return; }
+
+    const r = await apiPost('api/start_encoding.php', {
+        assessment_id: selectedSharedAsmtId,
+        section_ids:   checked,
+    });
+    if (r.error) { showToast(r.error, 'error'); return; }
+
+    showToast(`Started encoding — ${r.sections} section(s) ready.`);
+    setTimeout(() => {
+        loadAssessment(selectedSharedAsmtId);
+        document.getElementById('newAssessmentPanel').style.display = 'none';
+    }, 600);
+}
+
+// ============================================================
+// ADMIN: LEARNING COMPETENCIES MANAGEMENT
+// ============================================================
+
+async function loadCompetencies() {
+    const subjectId = document.getElementById('compSubjectFilter')?.value;
+    const termId    = document.getElementById('compTermFilter')?.value;
+    const wrap      = document.getElementById('compTableWrap');
+    const emptyMsg  = document.getElementById('compEmptyMsg');
+    const tbody     = document.getElementById('compTbody');
+
+    if (!subjectId) {
+        wrap.style.display = 'none';
+        emptyMsg.style.display = '';
+        emptyMsg.textContent = 'Select a subject above to view or add competencies.';
+        return;
+    }
+
+    wrap.style.display = 'none';
+    emptyMsg.style.display = '';
+    emptyMsg.textContent = 'Loading…';
+
+    const params = new URLSearchParams({ subject_id: subjectId });
+    if (termId) params.set('term_id', termId);
+    const data = await apiGet(`api/get_competencies.php?${params}`);
+    if (data.error) { emptyMsg.textContent = data.error; return; }
+
+    const rows = data.competencies || [];
+    if (!rows.length) {
+        emptyMsg.style.display = '';
+        emptyMsg.textContent   = 'No competencies found for this subject/term. Add them below.';
+        wrap.style.display = 'block';
+        tbody.innerHTML = '<tr><td colspan="3" class="text-muted" style="text-align:center">No competencies yet.</td></tr>';
+        return;
+    }
+
+    emptyMsg.style.display = 'none';
+    wrap.style.display = 'block';
+    tbody.innerHTML = rows.map(c => `
+        <tr id="compRow${c.id}">
+            <td><span id="ccode${c.id}">${escHtml(c.code || '—')}</span></td>
+            <td><span id="cdesc${c.id}">${escHtml(c.description)}</span></td>
+            <td>
+                <button class="btn btn-sm btn-outline" onclick="adminEditCompetency(${c.id},'${escHtml(c.code || '')}','${escHtml(c.description).replace(/'/g,"\\'")}')">Edit</button>
+                <button class="btn btn-sm btn-danger"  onclick="adminDeleteCompetency(${c.id})">Del</button>
+            </td>
+        </tr>`).join('');
+}
+
+async function adminAddCompetency() {
+    const subjectId = document.getElementById('compSubjectFilter')?.value;
+    const termId    = document.getElementById('compTermFilter')?.value;
+    const code      = document.getElementById('newCompCode').value.trim();
+    const desc      = document.getElementById('newCompDesc').value.trim();
+    if (!subjectId) { showToast('Select a subject first.', 'error'); return; }
+    if (!desc)      { showToast('Description is required.', 'error'); return; }
+
+    const r = await apiPost('api/save_competency.php', {
+        action: 'insert', subject_id: +subjectId,
+        term_id: termId ? +termId : null, code, description: desc,
+    });
+    if (r.error) { showToast(r.error, 'error'); return; }
+    document.getElementById('newCompCode').value = '';
+    document.getElementById('newCompDesc').value = '';
+    showToast('Competency added.');
+    loadCompetencies();
+}
+
+function adminEditCompetency(id, code, desc) {
+    const newCode = prompt('Code (optional):', code === '—' ? '' : code);
+    if (newCode === null) return;
+    const newDesc = prompt('Description:', desc);
+    if (!newDesc?.trim()) return;
+
+    const subjectId = document.getElementById('compSubjectFilter')?.value;
+    const termId    = document.getElementById('compTermFilter')?.value;
+    apiPost('api/save_competency.php', {
+        action: 'update', id, subject_id: +subjectId,
+        term_id: termId ? +termId : null,
+        code: newCode.trim(), description: newDesc.trim(),
+    }).then(r => {
+        if (r.error) { showToast(r.error, 'error'); return; }
+        showToast('Competency updated.');
+        loadCompetencies();
+    });
+}
+
+async function adminDeleteCompetency(id) {
+    if (!confirm('Delete this competency? This cannot be undone if it is not mapped to any assessment.')) return;
+    const r = await apiPost('api/save_competency.php', { action: 'delete', id });
+    if (r.error) { showToast(r.error, 'error'); return; }
+    showToast('Deleted.');
+    loadCompetencies();
+}
+
+function openCompCsvModal() {
+    const subjectId = document.getElementById('compSubjectFilter')?.value;
+    if (!subjectId) { showToast('Select a subject first.', 'error'); return; }
+    document.getElementById('compCsvText').value   = '';
+    document.getElementById('compCsvResult').textContent = '';
+    document.getElementById('compCsvModal').style.display = '';
+}
+function closeCompCsvModal() { document.getElementById('compCsvModal').style.display = 'none'; }
+
+async function doCompCsvImport() {
+    const subjectId = document.getElementById('compSubjectFilter')?.value;
+    const termId    = document.getElementById('compTermFilter')?.value;
+    const text      = document.getElementById('compCsvText').value.trim();
+    const resultEl  = document.getElementById('compCsvResult');
+    if (!text) { resultEl.textContent = 'Paste CSV text first.'; return; }
+
+    const fd = new FormData();
+    fd.set('csrf_token',  CSRF_TOKEN);
+    fd.set('subject_id',  subjectId);
+    if (termId) fd.set('term_id', termId);
+    fd.set('csv_text', text);
+
+    let data;
+    try {
+        const res = await fetch(BASE_URL + 'api/import_competencies_csv.php', { method: 'POST', body: fd });
+        data = await res.json();
+    } catch { resultEl.textContent = 'Network error.'; return; }
+
+    if (data.error) { resultEl.style.color = 'var(--c-danger)'; resultEl.textContent = data.error; return; }
+    resultEl.style.color = 'var(--c-success)';
+    resultEl.textContent = `✓ Imported ${data.inserted} competencies.` +
+        (data.parse_errors ? ` (${data.parse_errors} lines skipped)` : '');
+    loadCompetencies();
+}
+
+// ============================================================
+// ADMIN: CREATE ASSESSMENT MODAL (4-step)
+// ============================================================
+
+let _createStep       = 1;
+let _createAsmtType   = '';
+let _createCompetencies = [];  // competencies loaded for step 3
+let _itemCompMap      = {};    // item_no → competency_id
+
+function openCreateAsmtModal() {
+    _createStep     = 1;
+    _createAsmtType = '';
+    _itemCompMap    = {};
+    document.getElementById('createAsmtModal').style.display = '';
+    renderCreateStep(1);
+}
+function closeCreateAsmtModal() { document.getElementById('createAsmtModal').style.display = 'none'; }
+
+function renderCreateStep(n) {
+    _createStep = n;
+    [1,2,3,4].forEach(i => {
+        document.getElementById('createStep' + i).style.display = i === n ? '' : 'none';
+        const dot = document.getElementById('stepDot' + i);
+        dot.className = 'step-dot' + (i < n ? ' done' : i === n ? ' active' : '');
+    });
+    document.getElementById('btnCreatePrev').style.display = n > 1 ? '' : 'none';
+    document.getElementById('btnCreateNext').style.display = n < 4 ? '' : 'none';
+    document.getElementById('btnCreateDone').style.display = n === 4 ? '' : 'none';
+    document.getElementById('createAsmtErr').textContent  = '';
+
+    if (n === 4) renderReviewStep();
+}
+
+function selectAsmtType(type, defaultItems) {
+    _createAsmtType = type;
+    document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+    document.getElementById('typeCard' + type.charAt(0).toUpperCase() + type.slice(1))?.classList.add('selected');
+    document.getElementById('asmtTotalItems').value = defaultItems;
+}
+
+async function loadTermsForModal() {
+    const syId  = document.getElementById('asmtSY')?.value;
+    const sel   = document.getElementById('asmtTerm');
+    sel.innerHTML = '<option value="">Loading…</option>';
+    if (!syId) return;
+    const data = await apiGet(`api/get_terms.php?sy_id=${syId}`);
+    sel.innerHTML = '<option value="">— select —</option>' +
+        (data.terms || []).map(t => `<option value="${t.id}">Term ${t.term_no} — ${escHtml(t.name)}</option>`).join('');
+}
+
+async function createAsmtNext() {
+    const errEl = document.getElementById('createAsmtErr');
+    errEl.textContent = '';
+
+    if (_createStep === 1) {
+        if (!_createAsmtType) { errEl.textContent = 'Please select an assessment type.'; return; }
+        const ti = +document.getElementById('asmtTotalItems').value;
+        if (!ti || ti < 1 || ti > 200) { errEl.textContent = 'Total items must be between 1 and 200.'; return; }
+        renderCreateStep(2);
+
+    } else if (_createStep === 2) {
+        const term    = document.getElementById('asmtTerm').value;
+        const subject = document.getElementById('asmtSubject').value;
+        const title   = document.getElementById('asmtTitle').value.trim();
+        if (!term || !subject || !title) { errEl.textContent = 'School Year, Term, Subject, and Title are required.'; return; }
+        renderCreateStep(3);
+        await loadCompetenciesForMapping();
+
+    } else if (_createStep === 3) {
+        // Collect current mapping
+        _itemCompMap = {};
+        document.querySelectorAll('#compMappingGrid select[data-item]').forEach(sel => {
+            if (sel.value) _itemCompMap[+sel.dataset.item] = +sel.value;
+        });
+        renderCreateStep(4);
+    }
+}
+
+function createAsmtPrev() {
+    if (_createStep > 1) renderCreateStep(_createStep - 1);
+}
+
+async function loadCompetenciesForMapping() {
+    const subjectId = document.getElementById('asmtSubject').value;
+    const termId    = document.getElementById('asmtTerm').value;
+    const totalItems = +document.getElementById('asmtTotalItems').value;
+    const grid      = document.getElementById('compMappingGrid');
+    const bulkSel   = document.getElementById('bulkCompSel');
+
+    grid.innerHTML = '<p class="text-muted">Loading competencies…</p>';
+    bulkSel.innerHTML = '<option value="">— select competency —</option>';
+
+    const params = new URLSearchParams({ subject_id: subjectId, term_id: termId });
+    const data   = await apiGet(`api/get_competencies.php?${params}`);
+    _createCompetencies = data.competencies || [];
+
+    if (!_createCompetencies.length) {
+        grid.innerHTML = `<div class="alert alert-warning">No competencies found for this subject and term.
+            Add them in the <strong>Learning Competencies</strong> tab first, then come back.</div>`;
+        bulkSel.innerHTML = '<option value="">No competencies available</option>';
+        return;
+    }
+
+    // Populate bulk select
+    _createCompetencies.forEach(c => {
+        const o = new Option((c.code ? c.code + ' — ' : '') + c.description.substring(0,60), c.id);
+        bulkSel.appendChild(o);
+    });
+    document.getElementById('bulkTo').value = totalItems;
+
+    // Render per-item grid
+    const optionsHtml = `<option value="">— unassigned —</option>` +
+        _createCompetencies.map(c =>
+            `<option value="${c.id}">${escHtml((c.code ? c.code + ' — ' : '') + c.description.substring(0,60))}</option>`
+        ).join('');
+
+    let rows = '';
+    for (let i = 1; i <= totalItems; i++) {
+        const savedComp = _itemCompMap[i] || '';
+        rows += `<tr><td>${i}</td><td>
+            <select data-item="${i}" onchange="updateItemCompSummary()" style="width:100%">
+                ${optionsHtml.replace(`value="${savedComp}"`, `value="${savedComp}" selected`)}
+            </select></td></tr>`;
+    }
+    grid.innerHTML = `<table class="comp-map-table">
+        <thead><tr><th>#</th><th>Learning Competency</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+
+    updateItemCompSummary();
+}
+
+function applyBulkAssign() {
+    const compId = document.getElementById('bulkCompSel').value;
+    const from   = +document.getElementById('bulkFrom').value;
+    const to     = +document.getElementById('bulkTo').value;
+    if (!compId || !from || !to || from > to) {
+        showToast('Select a competency and a valid item range.', 'error'); return;
+    }
+    document.querySelectorAll('#compMappingGrid select[data-item]').forEach(sel => {
+        const item = +sel.dataset.item;
+        if (item >= from && item <= to) sel.value = compId;
+    });
+    updateItemCompSummary();
+}
+
+function updateItemCompSummary() {
+    const summary  = document.getElementById('compMappingSummary');
+    const counts   = {};  // competency_id → {label, items[]}
+    let unassigned = 0;
+    const totalItems = +document.getElementById('asmtTotalItems').value;
+
+    document.querySelectorAll('#compMappingGrid select[data-item]').forEach(sel => {
+        const item = +sel.dataset.item;
+        const cid  = sel.value;
+        if (!cid) { unassigned++; return; }
+        if (!counts[cid]) {
+            const comp = _createCompetencies.find(c => String(c.id) === cid);
+            counts[cid] = { label: comp ? (comp.code || comp.description.substring(0,40)) : cid, items: [] };
+        }
+        counts[cid].items.push(item);
+    });
+
+    const rows = Object.values(counts).map(c =>
+        `<div class="comp-summary-row">
+            <span class="comp-summary-badge">${escHtml(c.label)}</span>
+            <span class="text-muted">items ${c.items.join(',')} <em>(${c.items.length})</em></span>
+        </div>`
+    ).join('');
+
+    const warnHtml = unassigned > 0
+        ? `<div class="comp-unassigned-warn">⚠ ${unassigned} of ${totalItems} item${unassigned > 1 ? 's' : ''} unassigned</div>`
+        : `<div style="color:var(--c-success);font-size:.8rem">✓ All items mapped</div>`;
+
+    summary.innerHTML = rows + warnHtml;
+}
+
+function renderReviewStep() {
+    const type       = _createAsmtType;
+    const totalItems = document.getElementById('asmtTotalItems').value;
+    const subject    = document.getElementById('asmtSubject');
+    const subjectTxt = subject.options[subject.selectedIndex]?.text || '—';
+    const term       = document.getElementById('asmtTerm');
+    const termTxt    = term.options[term.selectedIndex]?.text || '—';
+    const title      = document.getElementById('asmtTitle').value;
+    const date       = document.getElementById('asmtDate').value;
+    const mapped     = Object.keys(_itemCompMap).length;
+
+    const typeLabel  = { summative: 'Summative Test', term_exam: 'Term Exam', periodic: 'Periodic' }[type] || type;
+
+    document.getElementById('asmtReviewContent').innerHTML = `
+        <table class="data-table" style="font-size:.9rem">
+            <tr><th>Type</th><td>${escHtml(typeLabel)}</td></tr>
+            <tr><th>Total Items</th><td>${escHtml(totalItems)}</td></tr>
+            <tr><th>Subject</th><td>${escHtml(subjectTxt)}</td></tr>
+            <tr><th>Term</th><td>${escHtml(termTxt)}</td></tr>
+            <tr><th>Title</th><td>${escHtml(title)}</td></tr>
+            <tr><th>Date Given</th><td>${date || '— not set —'}</td></tr>
+            <tr><th>Competency Coverage</th><td>
+                ${mapped} of ${totalItems} item${totalItems > 1 ? 's' : ''} mapped
+                ${mapped < totalItems ? `<span class="comp-unassigned-warn"> (${totalItems - mapped} unassigned)</span>` : ' ✓'}
+            </td></tr>
+        </table>`;
+}
+
+async function doCreateAssessment() {
+    const errEl = document.getElementById('createAsmtErr');
+    errEl.textContent = '';
+
+    const payload = {
+        type:                _createAsmtType,
+        total_items:         +document.getElementById('asmtTotalItems').value,
+        subject_id:          +document.getElementById('asmtSubject').value,
+        term_id:             +document.getElementById('asmtTerm').value,
+        title:               document.getElementById('asmtTitle').value.trim(),
+        date_given:          document.getElementById('asmtDate').value || null,
+        item_competency_map: _itemCompMap,
+    };
+
+    const btn = document.getElementById('btnCreateDone');
+    btn.disabled = true; btn.textContent = 'Creating…';
+
+    const r = await apiPost('api/create_admin_assessment.php', payload);
+    btn.disabled = false; btn.textContent = '✓ Create Assessment';
+
+    if (r.error) { errEl.textContent = r.error; return; }
+    showToast(`Assessment created (ID #${r.assessment_id}). Teachers can now select it.`);
+    closeCreateAsmtModal();
+}
+
+// ============================================================
+// ADMIN: COMPETENCY ANALYTICS CHART + DRILL-DOWN TABLE
+// ============================================================
+
+function renderCompetencySection(data) {
+    const rows    = data.least_mastered_competencies || [];
+    const cardEl  = document.getElementById('compChartCard');
+    const drillEl = document.getElementById('compDrillTable');
+    if (!cardEl) return;
+
+    if (!rows.length) { cardEl.style.display = 'none'; return; }
+
+    cardEl.style.display = '';
+
+    // Chart: top 10 least mastered
+    const chartData = rows.slice(0, 10);
+    const labels  = chartData.map(r => r.code || r.description.substring(0, 30) + '…');
+    const values  = chartData.map(r => r.pct);
+    const colors  = values.map(v => v < 50 ? '#e55934' : v < 75 ? '#f0a500' : '#2d6a4f');
+
+    renderChart('chartCompetency', {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [{
+                label: '% Correct',
+                data: values,
+                backgroundColor: colors,
+                borderRadius: 4,
+            }],
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => {
+                            const row = chartData[items[0].dataIndex];
+                            return (row.code ? row.code + ' — ' : '') + row.description;
+                        },
+                        label: (item) => ` ${item.raw.toFixed(2)}%`,
+                    },
+                },
+            },
+            scales: {
+                x: {
+                    min: 0, max: 100,
+                    ticks: { callback: v => v + '%' },
+                },
+            },
+            annotation: {
+                annotations: [{
+                    type: 'line', xMin: 75, xMax: 75, borderColor: '#e07b00',
+                    borderWidth: 2, borderDash: [4, 4],
+                    label: { content: '75% target', display: true, position: 'start', font: { size: 10 } },
+                }],
+            },
+        },
+    });
+
+    // Drill-down table
+    drillEl.innerHTML = `
+        <table class="data-table" style="font-size:.82rem;margin-top:.5rem">
+            <thead><tr>
+                <th>Code</th><th>Description</th>
+                <th style="text-align:center">% Correct</th>
+                <th style="text-align:center">Sections</th>
+                <th style="text-align:center">f Correct</th>
+                <th style="text-align:center">f Total</th>
+            </tr></thead>
+            <tbody>
+            ${rows.map(r => {
+                const cls = r.pct < 50 ? 'pct-red' : r.pct < 75 ? 'pct-yellow' : 'pct-green';
+                return `<tr>
+                    <td>${escHtml(r.code || '—')}</td>
+                    <td style="max-width:280px">${escHtml(r.description)}</td>
+                    <td class="${cls}" style="text-align:center">${r.pct}%</td>
+                    <td style="text-align:center">${r.section_count}</td>
+                    <td style="text-align:center">${r.total_correct}</td>
+                    <td style="text-align:center">${r.total_possible}</td>
+                </tr>`;
+            }).join('')}
+            </tbody>
+        </table>`;
+}

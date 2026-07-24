@@ -5,6 +5,8 @@
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS teacher_assessment_encodings;
+DROP TABLE IF EXISTS assessment_item_competencies;
 DROP TABLE IF EXISTS competencies;
 DROP TABLE IF EXISTS item_correct_counts;
 DROP TABLE IF EXISTS score_frequencies;
@@ -138,23 +140,26 @@ CREATE INDEX idx_ta_sy      ON teacher_assignments(school_year_id);
 -- ASSESSMENTS
 -- ------------------------------------------------------------
 CREATE TABLE assessments (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    teacher_id  INT NOT NULL,
-    subject_id  INT NOT NULL,
-    term_id     INT NOT NULL,
-    type        ENUM('summative','periodic','term_exam') NOT NULL,
-    title       VARCHAR(200) NOT NULL,
-    total_items INT NOT NULL CHECK (total_items > 0),
-    date_given  DATE DEFAULT NULL,
-    status      ENUM('draft','submitted','approved','returned') NOT NULL DEFAULT 'draft',
-    reviewed_by INT DEFAULT NULL,
-    remarks     TEXT DEFAULT NULL,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (teacher_id)  REFERENCES users(id)     ON DELETE CASCADE,
-    FOREIGN KEY (subject_id)  REFERENCES subjects(id)  ON DELETE CASCADE,
-    FOREIGN KEY (term_id)     REFERENCES terms(id)     ON DELETE CASCADE,
-    FOREIGN KEY (reviewed_by) REFERENCES users(id)     ON DELETE SET NULL
+    id                INT AUTO_INCREMENT PRIMARY KEY,
+    teacher_id        INT NULL,
+    subject_id        INT NOT NULL,
+    term_id           INT NOT NULL,
+    type              ENUM('summative','periodic','term_exam') NOT NULL,
+    title             VARCHAR(200) NOT NULL,
+    total_items       INT NOT NULL CHECK (total_items > 0),
+    date_given        DATE DEFAULT NULL,
+    status            ENUM('draft','submitted','approved','returned') NOT NULL DEFAULT 'draft',
+    is_shared         TINYINT(1) NOT NULL DEFAULT 0,
+    created_by_admin  INT NULL,
+    reviewed_by       INT DEFAULT NULL,
+    remarks           TEXT DEFAULT NULL,
+    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (teacher_id)       REFERENCES users(id)     ON DELETE SET NULL,
+    FOREIGN KEY (subject_id)       REFERENCES subjects(id)  ON DELETE CASCADE,
+    FOREIGN KEY (term_id)          REFERENCES terms(id)     ON DELETE CASCADE,
+    FOREIGN KEY (created_by_admin) REFERENCES users(id)     ON DELETE SET NULL,
+    FOREIGN KEY (reviewed_by)      REFERENCES users(id)     ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_asmnt_teacher ON assessments(teacher_id);
@@ -217,14 +222,51 @@ CREATE INDEX idx_as_assessment ON assessment_sections(assessment_id);
 CREATE INDEX idx_as_section    ON assessment_sections(section_id);
 
 -- ------------------------------------------------------------
--- COMPETENCIES  (optional tagging of items)
+-- COMPETENCIES  (MELCs / MATATAG competencies per subject+term)
 -- ------------------------------------------------------------
 CREATE TABLE competencies (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     subject_id  INT NOT NULL,
-    code        VARCHAR(60) NOT NULL,
+    term_id     INT NULL,
+    code        VARCHAR(60) DEFAULT NULL,
     description TEXT NOT NULL,
-    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE
+    FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
+    FOREIGN KEY (term_id)    REFERENCES terms(id)    ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_comp_subject ON competencies(subject_id);
+CREATE INDEX idx_comp_term    ON competencies(term_id);
+
+-- ------------------------------------------------------------
+-- ASSESSMENT ITEM → COMPETENCY MAP
+-- One item maps to exactly one competency; one competency covers many items.
+-- ------------------------------------------------------------
+CREATE TABLE assessment_item_competencies (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    assessment_id INT NOT NULL,
+    item_no       SMALLINT NOT NULL,
+    competency_id INT NOT NULL,
+    UNIQUE KEY uq_asmt_item (assessment_id, item_no),
+    INDEX idx_aic_asmt (assessment_id),
+    INDEX idx_aic_comp (competency_id),
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id)  ON DELETE CASCADE,
+    FOREIGN KEY (competency_id) REFERENCES competencies(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ------------------------------------------------------------
+-- TEACHER ENCODING STATUS  (per-teacher progress on shared assessments)
+-- ------------------------------------------------------------
+CREATE TABLE teacher_assessment_encodings (
+    id            INT AUTO_INCREMENT PRIMARY KEY,
+    assessment_id INT NOT NULL,
+    teacher_id    INT NOT NULL,
+    status        ENUM('draft','submitted','approved','returned') NOT NULL DEFAULT 'draft',
+    remarks       TEXT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_tae (assessment_id, teacher_id),
+    FOREIGN KEY (assessment_id) REFERENCES assessments(id) ON DELETE CASCADE,
+    FOREIGN KEY (teacher_id)    REFERENCES users(id)       ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_tae_teacher ON teacher_assessment_encodings(teacher_id);
