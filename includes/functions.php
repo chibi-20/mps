@@ -23,6 +23,24 @@ function h(string $s): string
     return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+function termLabel(array $term): string
+{
+    $no    = $term['term_no'] ?? '?';
+    $start = $term['start_date'] ?? null;
+    $end   = $term['end_date']   ?? null;
+    if ($start && $end) {
+        try {
+            $s   = new DateTime($start);
+            $e   = new DateTime($end);
+            $fmt = $s->format('Y') !== $e->format('Y')
+                ? $s->format('M j, Y') . ' – ' . $e->format('M j, Y')
+                : $s->format('M j')    . ' – ' . $e->format('M j, Y');
+            return "Term {$no} ({$fmt})";
+        } catch (Exception $ex) { /* fall through */ }
+    }
+    return "Term {$no}";
+}
+
 // ============================================================
 // Mastery band helpers
 // ============================================================

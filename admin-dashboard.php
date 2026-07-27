@@ -12,7 +12,7 @@ $activeSY    = $pdo->query("SELECT id, name FROM school_years WHERE is_active=1 
 $activeSYId  = $activeSY ? (int)$activeSY['id'] : 0;
 
 if ($activeSYId) {
-    $ts = $pdo->prepare("SELECT id, term_no, name FROM terms WHERE school_year_id=? ORDER BY term_no");
+    $ts = $pdo->prepare("SELECT id, term_no, name, start_date, end_date FROM terms WHERE school_year_id=? ORDER BY term_no");
     $ts->execute([$activeSYId]);
     $terms = $ts->fetchAll();
 } else {
@@ -21,14 +21,21 @@ if ($activeSYId) {
 
 $subjects    = $pdo->query("SELECT DISTINCT name FROM subjects ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
 $subjectsAll = $pdo->query("SELECT id, name, grade_level FROM subjects ORDER BY grade_level, name")->fetchAll();
-$gradeLevels = [9, 10];  // grades with sections
+$gradeLevels = $pdo->query(
+    "SELECT DISTINCT grade_level FROM sections ORDER BY grade_level"
+)->fetchAll(PDO::FETCH_COLUMN);
 
 // All terms across all school years (for edit modal + assessments filter)
 $allTerms = $pdo->query(
-    "SELECT t.id, t.term_no, t.name AS term_name, sy.id AS sy_id, sy.name AS sy_name
+    "SELECT t.id, t.term_no, t.name AS term_name, t.start_date, t.end_date,
+            sy.id AS sy_id, sy.name AS sy_name
      FROM terms t JOIN school_years sy ON sy.id = t.school_year_id
      ORDER BY sy.id DESC, t.term_no"
 )->fetchAll();
+foreach ($allTerms as &$_t) {
+    $_t['label'] = termLabel($_t) . ' — SY ' . $_t['sy_name'];
+}
+unset($_t);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -84,7 +91,7 @@ $allTerms = $pdo->query(
         <select id="f_term" onchange="refreshDashboard()">
             <option value="">All Terms</option>
             <?php foreach ($terms as $t): ?>
-            <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?></option>
+            <option value="<?= $t['id'] ?>"><?= h(termLabel($t)) ?></option>
             <?php endforeach; ?>
         </select>
         <select id="f_grade">
@@ -310,7 +317,7 @@ $allTerms = $pdo->query(
             <select id="compTermFilter" onchange="loadCompetencies(); updateCompAddState();" style="flex:1;min-width:140px">
                 <option value="">All Terms</option>
                 <?php foreach ($terms as $t): ?>
-                <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['name']) ?></option>
+                <option value="<?= $t['id'] ?>"><?= h(termLabel($t)) ?></option>
                 <?php endforeach; ?>
             </select>
             <button class="btn btn-sm btn-outline" id="btnCompCsv" onclick="openCompCsvModal()" disabled
@@ -379,7 +386,7 @@ $allTerms = $pdo->query(
         <select id="af_term">
             <option value="">All Terms</option>
             <?php foreach ($allTerms as $t): ?>
-            <option value="<?= $t['id'] ?>">Term <?= $t['term_no'] ?> — <?= h($t['term_name']) ?> (SY <?= h($t['sy_name']) ?>)</option>
+            <option value="<?= $t['id'] ?>"><?= h($t['label']) ?></option>
             <?php endforeach; ?>
         </select>
         <select id="af_subject">
@@ -476,9 +483,7 @@ $allTerms = $pdo->query(
                 <select id="editTerm">
                     <option value="">— select —</option>
                     <?php foreach ($allTerms as $t): ?>
-                    <option value="<?= $t['id'] ?>">
-                        Term <?= $t['term_no'] ?> — <?= h($t['term_name']) ?> (SY <?= h($t['sy_name']) ?>)
-                    </option>
+                    <option value="<?= $t['id'] ?>"><?= h($t['label']) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>

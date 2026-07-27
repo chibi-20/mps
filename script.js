@@ -1726,7 +1726,7 @@ async function loadTermsForModal() {
     if (!syId) return;
     const data = await apiGet(`api/get_terms.php?sy_id=${syId}`);
     sel.innerHTML = '<option value="">— select —</option>' +
-        (data.terms || []).map(t => `<option value="${t.id}">Term ${t.term_no} — ${escHtml(t.name)}</option>`).join('');
+        (data.terms || []).map(t => `<option value="${t.id}">${escHtml(t.label || 'Term ' + t.term_no)}</option>`).join('');
 }
 
 async function createAsmtNext() {
@@ -2027,7 +2027,7 @@ function loadAsmtTermFilter() {
         .filter(t => !syId || +t.sy_id === syId)
         .forEach(t => {
             const o = new Option(
-                `Term ${t.term_no} — ${t.term_name} (SY ${t.sy_name})`,
+                t.label || `Term ${t.term_no} — SY ${t.sy_name}`,
                 t.id
             );
             if (+t.id === +prev) o.selected = true;
