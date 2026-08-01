@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $pdo  = get_pdo();
         $stmt = $pdo->prepare(
-            'SELECT id, last_name, first_name, middle_name, password_hash, role, is_active
+            'SELECT id, last_name, first_name, middle_name, password_hash, role, is_active, must_change_password
              FROM users WHERE username = ?'
         );
         $stmt->execute([$username]);
@@ -32,12 +32,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Your account is pending admin approval. Please wait for activation.';
         } else {
             session_regenerate_id(true);
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['role']    = $user['role'];
-            $_SESSION['display'] = display_name($user);
-            $_SESSION['last_name'] = $user['last_name'];
+            $_SESSION['user_id']             = $user['id'];
+            $_SESSION['role']                = $user['role'];
+            $_SESSION['display']             = display_name($user);
+            $_SESSION['last_name']           = $user['last_name'];
+            $_SESSION['must_change_password'] = (int)$user['must_change_password'];
 
-            $redirect = $user['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php';
+            if ($user['role'] === 'teacher' && (int)$user['must_change_password']) {
+                $redirect = 'change-password.php';
+            } else {
+                $redirect = $user['role'] === 'admin' ? 'admin-dashboard.php' : 'teacher-dashboard.php';
+            }
             header('Location: ' . BASE_URL . $redirect);
             exit;
         }
@@ -102,6 +107,8 @@ $csrf = csrf_token();
             </form>
             <p class="auth-footer">
                 New teacher? <a href="<?= BASE_URL ?>register.php">Create an account</a>
+                &nbsp;&middot;&nbsp;
+                <a href="<?= BASE_URL ?>forgot-password.php">Forgot password?</a>
             </p>
         </div>
     </div>

@@ -235,6 +235,21 @@ unset($_t);
      PANEL: TEACHER ACCOUNTS
 ============================================================ -->
 <div id="panel-teachers" class="admin-panel" style="display:none">
+
+    <!-- Pending reset requests — shown by JS when non-empty -->
+    <div class="card" id="pendingResetCard" style="display:none;border:1.5px solid var(--c-warning)">
+        <h3 class="card-title" style="color:var(--maroon-dark)">&#9888; Pending Password Reset Requests</h3>
+        <p style="font-size:.875rem;color:var(--c-muted);margin-bottom:.75rem">
+            Teachers who have requested a reset via the login page. Use "Reset Now" to generate a temp password and relay it to the teacher.
+        </p>
+        <div class="table-scroll">
+            <table class="data-table">
+                <thead><tr><th>Name / Username Submitted</th><th>Requested</th><th>Action</th></tr></thead>
+                <tbody id="pendingResetTbody"></tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="card">
         <h3 class="card-title">Pending Approval</h3>
         <div class="table-scroll">
@@ -244,8 +259,14 @@ unset($_t);
             </table>
         </div>
     </div>
+
     <div class="card">
-        <h3 class="card-title">Active Teachers</h3>
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
+            <h3 class="card-title" style="margin:0">Active Teachers</h3>
+            <input type="text" id="teacherSearch" placeholder="Search name or username&hellip;"
+                   oninput="filterTeacherTable()"
+                   style="flex:1;min-width:160px;max-width:280px">
+        </div>
         <div class="table-scroll">
             <table class="data-table">
                 <thead><tr><th>Name</th><th>Username</th><th>Grade Levels</th><th>Subjects</th><th>Actions</th></tr></thead>
@@ -718,6 +739,52 @@ const BAND_COLORS     = {
 const SUBJECTS_ALL    = <?= json_encode($subjectsAll) ?>;
 const ALL_TERMS       = <?= json_encode($allTerms) ?>;
 </script>
+<!-- ============================================================
+     MODAL: RESET TEACHER PASSWORD
+============================================================ -->
+<div id="resetPwdModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeResetModal()">
+    <div class="modal-box" style="max-width:480px">
+        <h3 style="color:var(--maroon-dark);margin-bottom:1rem">Reset Teacher Password</h3>
+
+        <!-- Step 1: confirm -->
+        <div id="resetConfirmState">
+            <p>Reset password for <strong id="resetTeacherName"></strong>?</p>
+            <p style="font-size:.875rem;color:var(--c-muted);margin-top:.35rem">
+                Username: <code id="resetTeacherUsername"></code>
+            </p>
+            <div style="background:rgba(199,154,58,.12);border:2px solid var(--gold);border-radius:.5rem;padding:.75rem 1rem;margin-top:.9rem">
+                <p style="margin:0 0 .35rem;font-weight:600;color:var(--maroon-dark)">&#9888; Warning</p>
+                <ul style="margin:0;padding-left:1.2rem;font-size:.875rem;line-height:1.7">
+                    <li>The teacher's password will be reset to the default: <strong>ilovejacobo</strong></li>
+                    <li>The teacher <strong>must change their password</strong> on their next login.</li>
+                    <li>Make sure to <strong>inform the teacher</strong> of this reset.</li>
+                </ul>
+            </div>
+            <div style="display:flex;gap:.75rem;margin-top:1.5rem;justify-content:flex-end">
+                <button class="btn btn-outline" onclick="closeResetModal()">Cancel</button>
+                <button class="btn btn-primary" id="btnDoReset" onclick="confirmReset()">Generate Password</button>
+            </div>
+        </div>
+
+        <!-- Step 2: show temp password once -->
+        <div id="resetResultState" style="display:none">
+            <p>Temporary password for <strong id="resetResultName"></strong>:</p>
+            <div style="background:rgba(199,154,58,.1);border:2.5px solid var(--gold);border-radius:.5rem;padding:1rem 1.5rem;text-align:center;margin:1rem 0">
+                <code id="resetTempPwd" style="font-size:1.6rem;letter-spacing:.14em;color:var(--maroon-dark);font-weight:700;user-select:all"></code>
+            </div>
+            <p style="font-size:.8rem;color:var(--c-muted)">
+                Username: <strong><code id="resetResultUsername"></code></strong><br>
+                <span style="color:var(--c-danger)">&#9888; The teacher must change this password on their next login. Inform them of the reset.</span>
+            </p>
+            <div style="display:flex;gap:.75rem;margin-top:1.25rem;justify-content:flex-end;align-items:center">
+                <span id="resetCopyMsg" style="color:green;font-size:.875rem;display:none">&#10003; Copied!</span>
+                <button class="btn btn-outline" onclick="copyTempPwd()">Copy Password</button>
+                <button class="btn btn-primary" onclick="closeResetModal()">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="<?= BASE_URL ?>script.js"></script>
 </body>
 </html>

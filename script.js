@@ -1229,6 +1229,7 @@ async function loadTeachers() {
     if (!data) return;
     renderTeacherTable('pendingTbody', data.pending, true);
     renderTeacherTable('activeTbody',  data.active,  false);
+    renderPendingResets(data.pending_resets || []);
 }
 
 function renderTeacherTable(tbodyId, rows, isPending) {
@@ -1241,18 +1242,109 @@ function renderTeacherTable(tbodyId, rows, isPending) {
     }
     rows.forEach(r => {
         const tr = tbody.insertRow();
+        const pwdBadge = (!isPending && r.must_change_password)
+            ? ` <span class="badge-shared" title="Temporary password set — awaiting teacher change" style="background:#d97706;color:#fff;font-size:.7rem">pwd reset</span>`
+            : '';
         tr.innerHTML = `
-            <td class="text-left">${escHtml(r.display_name)}</td>
-            <td>${escHtml(r.username)}</td>
+            <td class="text-left">${escHtml(r.display_name)}${pwdBadge}</td>
+            <td><code>${escHtml(r.username)}</code></td>
             <td>${escHtml(r.grade_levels)}</td>
             <td class="text-left">${escHtml(r.subjects)}</td>
-            <td>${escHtml(r.created_at || '')}</td>
-            <td>
+            ${isPending ? `<td>${escHtml(r.created_at || '')}</td>` : ''}
+            <td style="white-space:nowrap">
                 ${isPending
                   ? `<button class="btn btn-sm btn-success" onclick="manageTeacher(${r.id},'approve')">Approve</button>`
-                  : `<button class="btn btn-sm btn-danger"  onclick="manageTeacher(${r.id},'deactivate')">Deactivate</button>`}
+                  : `<button class="btn btn-sm btn-outline"
+                         data-tid="${r.id}" data-tname="${escHtml(r.display_name)}" data-tusr="${escHtml(r.username)}"
+                         onclick="openResetModal(+this.dataset.tid,this.dataset.tname,this.dataset.tusr)"
+                         style="margin-right:.3rem">Reset Pwd</button>
+                     <button class="btn btn-sm btn-danger"  onclick="manageTeacher(${r.id},'deactivate')">Deactivate</button>`}
             </td>`;
     });
+}
+
+function filterTeacherTable() {
+    const q = (document.getElementById('teacherSearch')?.value || '').toLowerCase();
+    document.querySelectorAll('#activeTbody tr').forEach(tr => {
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+
+// ---- Reset Password Modal ----
+let _resetTargetId = null;
+
+function openResetModal(id, name, username) {
+    _resetTargetId = id;
+    document.getElementById('resetTeacherName').textContent     = name;
+    document.getElementById('resetTeacherUsername').textContent = username;
+    document.getElementById('resetConfirmState').style.display  = '';
+    document.getElementById('resetResultState').style.display   = 'none';
+    document.getElementById('btnDoReset').disabled              = false;
+    document.getElementById('btnDoReset').textContent           = 'Generate Password';
+    document.getElementById('resetPwdModal').style.display      = 'flex';
+}
+
+function closeResetModal() {
+    document.getElementById('resetPwdModal').style.display = 'none';
+    _resetTargetId = null;
+}
+
+async function confirmReset() {
+    if (!_resetTargetId) return;
+    const btn = document.getElementById('btnDoReset');
+    btn.disabled    = true;
+    btn.textContent = 'Resetting…';
+    let r;
+    try {
+        r = await apiPost('api/admin_reset_password.php', { user_id: _resetTargetId });
+    } catch (err) {
+        btn.disabled    = false;
+        btn.textContent = 'Reset Password';
+        showToast('Network error — could not reach the server.', 'error');
+        return;
+    }
+    btn.disabled    = false;
+    btn.textContent = 'Reset Password';
+    if (r?.error) { showToast(r.error, 'error'); return; }
+    document.getElementById('resetResultName').textContent      = r.teacher_name;
+    document.getElementById('resetResultUsername').textContent  = r.username;
+    document.getElementById('resetTempPwd').textContent         = r.temp_password;
+    document.getElementById('resetCopyMsg').style.display       = 'none';
+    document.getElementById('resetConfirmState').style.display  = 'none';
+    document.getElementById('resetResultState').style.display   = '';
+    loadTeachers();
+}
+
+function copyTempPwd() {
+    const pwd = document.getElementById('resetTempPwd')?.textContent || '';
+    if (!pwd) return;
+    navigator.clipboard.writeText(pwd).then(() => {
+        const msg = document.getElementById('resetCopyMsg');
+        if (msg) { msg.style.display = ''; setTimeout(() => msg.style.display = 'none', 2500); }
+    });
+}
+
+function renderPendingResets(rows) {
+    const card  = document.getElementById('pendingResetCard');
+    const tbody = document.getElementById('pendingResetTbody');
+    if (!card || !tbody) return;
+    if (!rows.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td class="text-left">
+                <strong>${escHtml(r.display_name)}</strong><br>
+                <small class="text-muted">${escHtml(r.username_submitted)}</small>
+            </td>
+            <td>${escHtml(r.requested_at || '')}</td>
+            <td>
+                ${r.user_id
+                    ? `<button class="btn btn-sm btn-outline"
+                           data-tid="${r.user_id}" data-tname="${escHtml(r.display_name)}" data-tusr="${escHtml(r.username_submitted)}"
+                           onclick="openResetModal(+this.dataset.tid,this.dataset.tname,this.dataset.tusr)">Reset Now</button>`
+                    : `<span class="text-muted" style="font-size:.875rem">Username not found</span>`}
+            </td>
+        </tr>`).join('');
 }
 
 async function manageTeacher(id, action) {

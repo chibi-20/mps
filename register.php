@@ -8,6 +8,22 @@ if (!empty($_SESSION['user_id'])) {
     exit;
 }
 
+$pdo = get_pdo();
+
+// Pre-load sections grouped by grade for the registration form (active school year)
+$regSy   = $pdo->query("SELECT id FROM school_years WHERE is_active=1 LIMIT 1")->fetch();
+$regSyId = $regSy ? (int)$regSy['id'] : 0;
+$regSectionsByGrade = [];
+if ($regSyId) {
+    $regSecStmt = $pdo->prepare(
+        "SELECT id, name, grade_level FROM sections WHERE school_year_id = ? ORDER BY grade_level, name"
+    );
+    $regSecStmt->execute([$regSyId]);
+    foreach ($regSecStmt->fetchAll() as $s) {
+        $regSectionsByGrade[(int)$s['grade_level']][] = $s;
+    }
+}
+
 $success = false;
 $errors  = [];
 $form    = [];
@@ -16,36 +32,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     verify_csrf();
 
     $form = [
-        'last_name'     => trim($_POST['last_name']     ?? ''),
-        'first_name'    => trim($_POST['first_name']    ?? ''),
-        'middle_name'   => trim($_POST['middle_name']   ?? ''),
-        'username'      => trim($_POST['username']      ?? ''),
-        'password'      => $_POST['password']           ?? '',
-        'confirm_pass'  => $_POST['confirm_pass']       ?? '',
-        'grade_levels'  => array_map('intval', (array)($_POST['grade_levels'] ?? [])),
-        'subjects'      => (array)($_POST['subjects'] ?? []),
+        'last_name'    => trim($_POST['last_name']    ?? ''),
+        'first_name'   => trim($_POST['first_name']   ?? ''),
+        'middle_name'  => trim($_POST['middle_name']  ?? ''),
+        'username'     => trim($_POST['username']     ?? ''),
+        'password'     => $_POST['password']          ?? '',
+        'confirm_pass' => $_POST['confirm_pass']      ?? '',
+        'grade_levels' => array_map('intval', (array)($_POST['grade_levels'] ?? [])),
+        'subjects'     => (array)($_POST['subjects']  ?? []),
+        'section_ids'  => array_values(array_unique(array_filter(
+            array_map('intval', (array)($_POST['section_ids'] ?? [])),
+            fn($id) => $id > 0
+        ))),
     ];
 
     // Validation
-    if ($form['last_name'] === '')    $errors[] = 'Last name is required.';
-    if ($form['first_name'] === '')   $errors[] = 'First name is required.';
-    if ($form['username'] === '')     $errors[] = 'Username is required.';
+    if ($form['last_name'] === '')  $errors[] = 'Last name is required.';
+    if ($form['first_name'] === '') $errors[] = 'First name is required.';
+    if ($form['username'] === '')   $errors[] = 'Username is required.';
     if (mb_strlen($form['password']) < 8)
         $errors[] = 'Password must be at least 8 characters.';
     if ($form['password'] !== $form['confirm_pass'])
         $errors[] = 'Passwords do not match.';
 
-    // Sanitize grade levels (must be from allowed list)
-    $validGrades = array_filter($form['grade_levels'], fn($g) => in_array($g, AVAILABLE_GRADE_LEVELS, true));
+    // array_values so the array is 0-indexed (needed for splat in prepared statements)
+    $validGrades = array_values(array_filter(
+        $form['grade_levels'], fn($g) => in_array($g, AVAILABLE_GRADE_LEVELS, true)
+    ));
     if (empty($validGrades)) $errors[] = 'Select at least one grade level.';
 
-    // Sanitize subjects (must be from allowed list)
-    $validSubjects = array_filter($form['subjects'], fn($s) => in_array($s, AVAILABLE_SUBJECTS, true));
+    $validSubjects = array_values(array_filter(
+        $form['subjects'], fn($s) => in_array($s, AVAILABLE_SUBJECTS, true)
+    ));
     if (empty($validSubjects)) $errors[] = 'Select at least one subject.';
 
     if (empty($errors)) {
-        $pdo  = get_pdo();
-
         // Check username uniqueness
         $stmt = $pdo->prepare('SELECT id FROM users WHERE username = ?');
         $stmt->execute([$form['username']]);
@@ -77,6 +98,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $usStmt = $pdo->prepare("INSERT INTO user_subjects (user_id, subject_name) VALUES (?,?)");
                 foreach ($validSubjects as $subj) {
                     $usStmt->execute([$uid, $subj]);
+                }
+
+                // Populate teacher_assignments so the encoding flow can find this teacher's sections.
+                // For each selected section: pair it with every grade-matching subject the teacher registered.
+                // Sections from wrong grades are silently ignored (server validates school_year_id + grade).
+                if (!empty($form['section_ids']) && $regSyId && !empty($validSubjects) && !empty($validGrades)) {
+                    $snPh = implode(',', array_fill(0, count($validSubjects), '?'));
+                    $grPh = implode(',', array_fill(0, count($validGrades),   '?'));
+
+                    // Resolve subject IDs (only for the teacher's registered subject names × valid grades)
+                    $subjIdStmt = $pdo->prepare(
+                        "SELECT id, grade_level FROM subjects WHERE name IN ({$snPh}) AND grade_level IN ({$grPh})"
+                    );
+                    $subjIdStmt->execute([...$validSubjects, ...$validGrades]);
+                    $subsByGrade = [];
+                    foreach ($subjIdStmt->fetchAll() as $sr) {
+                        $subsByGrade[(int)$sr['grade_level']][] = (int)$sr['id'];
+                    }
+
+                    // Validate section IDs: must belong to the active SY and a grade the teacher registered for
+                    $secPh    = implode(',', array_fill(0, count($form['section_ids']), '?'));
+                    $secChkSt = $pdo->prepare(
+                        "SELECT id, grade_level FROM sections
+                         WHERE id IN ({$secPh}) AND school_year_id = ? AND grade_level IN ({$grPh})"
+                    );
+                    $secChkSt->execute([...$form['section_ids'], $regSyId, ...$validGrades]);
+
+                    $taStmt = $pdo->prepare(
+                        "INSERT IGNORE INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id)
+                         VALUES (?,?,?,?)"
+                    );
+                    foreach ($secChkSt->fetchAll() as $sec) {
+                        foreach ($subsByGrade[(int)$sec['grade_level']] ?? [] as $subjId) {
+                            $taStmt->execute([$uid, $subjId, (int)$sec['id'], $regSyId]);
+                        }
+                    }
                 }
 
                 $pdo->commit();
@@ -209,6 +266,32 @@ $csrf = csrf_token();
             </div>
         </fieldset>
 
+        <fieldset class="form-fieldset">
+            <legend>Sections You Handle</legend>
+            <p style="font-size:.85rem;color:var(--c-muted);margin:0 0 .75rem">
+                Select the specific sections you teach. Only sections for your selected grade level(s) are shown.
+                You can leave this blank — the admin can assign sections after approving your account.
+            </p>
+            <?php if (empty($regSectionsByGrade)): ?>
+            <p style="font-size:.875rem;color:var(--c-muted)">No sections are configured in the system yet. The admin will assign your sections after approval.</p>
+            <?php else: ?>
+            <?php foreach ($regSectionsByGrade as $gl => $secs): ?>
+            <div class="grade-secs-group" data-grade="<?= $gl ?>" style="display:none;margin-bottom:.75rem">
+                <p style="font-weight:600;font-size:.85rem;color:var(--c-muted);margin:0 0 .35rem">Grade <?= $gl ?> sections:</p>
+                <div class="checklist checklist--grid">
+                    <?php foreach ($secs as $sec): ?>
+                    <label class="check-item">
+                        <input type="checkbox" name="section_ids[]" value="<?= $sec['id'] ?>"
+                               <?= in_array($sec['id'], $form['section_ids'] ?? [], true) ? 'checked' : '' ?>>
+                        <?= h($sec['name']) ?>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endforeach; ?>
+            <?php endif; ?>
+        </fieldset>
+
         <button type="submit" class="btn btn-primary btn-full">Submit Registration</button>
     </form>
     <p class="auth-footer"><a href="<?= BASE_URL ?>index.php">&larr; Back to Login</a></p>
@@ -217,5 +300,21 @@ $csrf = csrf_token();
     </div>
 
 </div>
+<script>
+function syncSectionGroups() {
+    document.querySelectorAll('input[name="grade_levels[]"]').forEach(function(cb) {
+        var grp = document.querySelector('.grade-secs-group[data-grade="' + cb.value + '"]');
+        if (!grp) return;
+        grp.style.display = cb.checked ? '' : 'none';
+        if (!cb.checked) {
+            grp.querySelectorAll('input[type="checkbox"]').forEach(function(s) { s.checked = false; });
+        }
+    });
+}
+document.querySelectorAll('input[name="grade_levels[]"]').forEach(function(cb) {
+    cb.addEventListener('change', syncSectionGroups);
+});
+syncSectionGroups(); // restore state on validation-error page reload
+</script>
 </body>
 </html>

@@ -34,8 +34,9 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     role          ENUM('admin','teacher') NOT NULL DEFAULT 'teacher',
     department    VARCHAR(100) DEFAULT NULL,
-    is_active     TINYINT(1)  NOT NULL DEFAULT 0,
-    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    is_active             TINYINT(1)  NOT NULL DEFAULT 0,
+    must_change_password  TINYINT(1)  NOT NULL DEFAULT 0,
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_users_role     ON users(role);
@@ -66,6 +67,23 @@ CREATE TABLE user_subjects (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE INDEX idx_us_user ON user_subjects(user_id);
+
+-- ------------------------------------------------------------
+-- PASSWORD RESET REQUESTS  (teacher self-service → admin inbox)
+-- ------------------------------------------------------------
+CREATE TABLE password_reset_requests (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    user_id            INT NULL,
+    username_submitted VARCHAR(50) NOT NULL,
+    status             ENUM('pending','done') NOT NULL DEFAULT 'pending',
+    requested_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    handled_by         INT NULL,
+    handled_at         DATETIME NULL,
+    FOREIGN KEY (user_id)    REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (handled_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_prr_status  (status),
+    INDEX idx_prr_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
 -- SCHOOL YEARS
@@ -334,3 +352,23 @@ JOIN school_years sy ON sy.id = t.school_year_id AND sy.name = '2026-2027'
 SET t.start_date = '2027-01-04', t.end_date = '2027-04-08', t.name = 'Term 3'
 WHERE t.term_no = 3;
 )
+
+-- ============================================================
+-- MIGRATION: Password Reset (run once on existing installs)
+-- ============================================================
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id                 INT AUTO_INCREMENT PRIMARY KEY,
+    user_id            INT NULL,
+    username_submitted VARCHAR(50) NOT NULL,
+    status             ENUM('pending','done') NOT NULL DEFAULT 'pending',
+    requested_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    handled_by         INT NULL,
+    handled_at         DATETIME NULL,
+    FOREIGN KEY (user_id)    REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (handled_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_prr_status  (status),
+    INDEX idx_prr_user_id (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

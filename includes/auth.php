@@ -19,6 +19,18 @@ function require_login(string $required_role = ''): array
         http_response_code(403);
         exit('Access denied.');
     }
+    // Force password-change guard — blocks all teacher pages/endpoints until the teacher sets their own password.
+    if ($required_role === 'teacher' && !empty($_SESSION['must_change_password'])) {
+        $base   = basename($_SERVER['SCRIPT_FILENAME'] ?? '');
+        $isApi  = str_contains(str_replace('\\', '/', $_SERVER['SCRIPT_FILENAME'] ?? ''), '/api/');
+        if ($base !== 'change-password.php') {
+            if ($isApi) {
+                json_response(['error' => 'Password change required.', 'must_change' => true], 403);
+            }
+            header('Location: ' . BASE_URL . 'change-password.php');
+            exit;
+        }
+    }
     return $_SESSION;
 }
 

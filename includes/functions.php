@@ -23,6 +23,21 @@ function h(string $s): string
     return htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+/**
+ * Generate a readable temporary password.
+ * Excludes ambiguous characters: 0, O, 1, l, I.
+ */
+function generate_temp_password(int $length = 10): string
+{
+    $chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    $max   = strlen($chars) - 1;
+    $out   = '';
+    for ($i = 0; $i < $length; $i++) {
+        $out .= $chars[random_int(0, $max)];
+    }
+    return $out;
+}
+
 function termLabel(array $term): string
 {
     $no    = $term['term_no'] ?? '?';
