@@ -112,8 +112,20 @@ unset($_t);
         <select id="f_assessment" onchange="refreshDashboard()">
             <option value="">All Assessments</option>
         </select>
-        <button class="btn btn-sm btn-outline" onclick="refreshDashboard()">Refresh</button>
+        <button id="btnRefresh" class="btn btn-sm btn-outline" onclick="refreshDashboard()" disabled>Refresh</button>
+        <button id="btnExportSubject" class="btn btn-sm btn-outline" onclick="exportSubjectReport()" disabled
+                title="Select a subject to enable export">Export Subject Report</button>
     </div>
+
+    <!-- Empty state: shown until a Subject is selected -->
+    <div id="dashboardEmptyState" class="card" style="text-align:center;padding:3rem 1rem;margin-top:.5rem">
+        <div style="font-size:2.5rem;margin-bottom:.75rem">📊</div>
+        <p style="font-size:1.05rem;font-weight:600;color:var(--maroon-dark);margin:0 0 .4rem">Select a Subject to view analytics</p>
+        <p style="font-size:.875rem;color:var(--c-muted);margin:0">Choose a subject from the filter above to load MPS and Item Analysis data.</p>
+    </div>
+
+    <!-- Dashboard content: hidden until a Subject is selected -->
+    <div id="dashboardContent" style="display:none">
 
     <!-- KPI Cards -->
     <div class="kpi-grid">
@@ -144,46 +156,43 @@ unset($_t);
             <h4 class="card-title">MPS per Subject
                 <small class="text-muted">(target line = 75%)</small>
             </h4>
-            <canvas id="chartMpsSubject"></canvas>
+            <div style="position:relative;height:260px"><canvas id="chartMpsSubject"></canvas></div>
         </div>
         <div class="card chart-card">
             <h4 class="card-title">MPS per Grade Level
                 <small class="text-muted">(target line = 75%)</small>
             </h4>
-            <canvas id="chartMpsGrade"></canvas>
+            <div style="position:relative;height:260px"><canvas id="chartMpsGrade"></canvas></div>
         </div>
     </div>
 
-    <!-- Charts Row 2 -->
-    <div class="chart-grid chart-grid-2">
-        <div class="card chart-card">
-            <h4 class="card-title">Mastery Level Distribution per Section</h4>
-            <canvas id="chartMastery"></canvas>
-        </div>
-        <div class="card chart-card">
-            <h4 class="card-title">NPWRM per Section</h4>
-            <canvas id="chartNpwrm"></canvas>
-        </div>
+    <!-- Score Distribution per Grade Level — one small pie per grade -->
+    <div class="card" style="margin-top:.75rem">
+        <h4 class="card-title">Score Distribution per Grade Level
+            <small class="text-muted">(7 performance bands — below 75% highlighted in red)</small>
+        </h4>
+        <div id="bandDistPies" style="display:flex;flex-wrap:wrap;gap:1.5rem;justify-content:center;align-items:flex-start;padding:.5rem 0"></div>
+        <div id="bandDistLegend" style="margin-top:.75rem"></div>
     </div>
 
     <!-- Charts Row 3 -->
     <div class="chart-grid chart-grid-2">
         <div class="card chart-card">
             <h4 class="card-title">Least-Mastered Items <small class="text-muted">(lowest % correct)</small></h4>
-            <canvas id="chartLeastMastered"></canvas>
+            <div style="position:relative;height:300px"><canvas id="chartLeastMastered"></canvas></div>
         </div>
         <div class="card chart-card">
             <h4 class="card-title">MPS Trend Across Assessments</h4>
-            <canvas id="chartMpsTrend"></canvas>
+            <div style="position:relative;height:260px"><canvas id="chartMpsTrend"></canvas></div>
         </div>
     </div>
 
     <!-- Least-Mastered Competencies -->
     <div class="card" id="compChartCard" style="display:none">
         <h4 class="card-title">Least-Mastered Learning Competencies
-            <small class="text-muted">(items with competency mapping only)</small>
+            <small class="text-muted" id="compChartNote">(items with competency mapping only)</small>
         </h4>
-        <canvas id="chartCompetency" height="220"></canvas>
+        <div style="position:relative;height:300px"><canvas id="chartCompetency"></canvas></div>
         <div id="compDrillTable" class="table-scroll" style="margin-top:1rem"></div>
     </div>
 
@@ -196,7 +205,9 @@ unset($_t);
             <table id="heatmapTable" class="data-table heatmap-table"></table>
         </div>
     </div>
-</div>
+
+    </div><!-- /#dashboardContent -->
+</div><!-- /#panel-analytics -->
 
 <!-- ============================================================
      PANEL: SUBMISSIONS

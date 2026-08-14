@@ -48,18 +48,20 @@ $assessments = $asmtStmt->fetchAll();
 
 if (empty($assessments)) {
     json_response([
-        'mps_per_section'              => [],
         'mps_per_grade'                => [],
         'mps_per_subject'              => [],
-        'mastery_distribution'         => [],
+        'band_distribution'            => [],
         'least_mastered_items'         => [],
         'least_mastered_competencies'  => [],
         'item_heatmap'                 => ['sections'=>[],'items'=>[],'data'=>[]],
         'mps_trend'                    => [],
-        'npwrm_per_section'            => [],
         'kpis'                         => ['overall_mps'=>0,'total_examinees'=>0,'submitted_count'=>0,'below50_items'=>0],
     ]);
 }
+
+// Fast assessment lookup by id
+$asmtById = [];
+foreach ($assessments as $a) $asmtById[(int)$a['id']] = $a;
 
 $asmtIds    = array_column($assessments, 'id');
 $totalItems = (int)($assessments[0]['total_items'] ?? 40);
@@ -79,7 +81,15 @@ if ($sectionId) $sfParams[] = $sectionId;
 $sfStmt->execute($sfParams);
 $sfRows = $sfStmt->fetchAll();
 
-// Index by section: section_id → {assessment_id, section_name, rows[]}
+// Cases per (assessment_id, section_id) — accurate denominator for per-row computations
+$casesByAsmtSec = [];
+foreach ($sfRows as $r) {
+    $aId = (int)$r['assessment_id'];
+    $sid = (int)$r['section_id'];
+    $casesByAsmtSec[$aId][$sid] = ($casesByAsmtSec[$aId][$sid] ?? 0) + (int)$r['frequency'];
+}
+
+// Index by section for heatmap section names
 $secData = [];
 foreach ($sfRows as $r) {
     $sid = (int)$r['section_id'];
@@ -88,8 +98,7 @@ foreach ($sfRows as $r) {
     }
     $aId = (int)$r['assessment_id'];
     if (!isset($secData[$sid]['assessments'][$aId])) {
-        // find total_items for this assessment
-        $ti = (int)(array_values(array_filter($assessments, fn($a) => (int)$a['id'] === $aId))[0]['total_items'] ?? 40);
+        $ti = (int)($asmtById[$aId]['total_items'] ?? 40);
         $secData[$sid]['assessments'][$aId] = ['total_items' => $ti, 'rows' => []];
     }
     $secData[$sid]['assessments'][$aId]['rows'][] = [
@@ -97,71 +106,33 @@ foreach ($sfRows as $r) {
     ];
 }
 
-// ---- Compute MPS per Section (aggregate across all assessments in filter) ----
-$mpsPerSection      = [];
-$masteryDistribution= [];
-$npwrmPerSection    = [];
-$totalExaminees     = 0;
-$grandCases = 0; $grandFx = 0;
-
+// Cases per section (all assessments combined) — used for heatmap
+$casesBySec = [];
 foreach ($secData as $sid => $sec) {
-    $cases = 0; $sumFx = 0; $npwrm = 0;
-    $bands = array_fill_keys(array_keys(MASTERY_BANDS), 0);
-
-    foreach ($sec['assessments'] as $aId => $ad) {
-        $ti = $ad['total_items'];
-        foreach ($ad['rows'] as $row) {
-            $f = $row['frequency']; $score = $row['score'];
-            $cases  += $f; $sumFx += $f * $score;
-            $pct  = $ti > 0 ? $score / $ti * 100 : 0;
-            $band = get_mastery_band($pct);
-            $bands[$band] += $f;
-            if ($pct >= MASTERY_THRESHOLD) $npwrm += $f;
-        }
+    $c = 0;
+    foreach ($sec['assessments'] as $ad) {
+        foreach ($ad['rows'] as $row) $c += $row['frequency'];
     }
-
-    $ti   = (int)(reset($sec['assessments'])['total_items'] ?? 40);
-    $mean = $cases > 0 ? $sumFx / $cases : 0;
-    $mps  = ($cases > 0 && $ti > 0) ? $mean / $ti * 100 : 0;
-
-    $totalExaminees += $cases;
-    $grandCases     += $cases;
-    $grandFx        += $sumFx;
-
-    $bandPct = [];
-    foreach ($bands as $k => $cnt) {
-        $bandPct[$k] = $cases > 0 ? round($cnt / $cases * 100, 2) : 0;
-    }
-
-    $mpsPerSection[] = [
-        'section_id'   => $sid,
-        'section_name' => $sec['name'],
-        'mps'          => round($mps, 2),
-        'cases'        => $cases,
-    ];
-    $masteryDistribution[] = [
-        'section_name' => $sec['name'],
-        'bands'        => $bandPct,
-    ];
-    $npwrmPerSection[] = [
-        'section_name' => $sec['name'],
-        'npwrm'        => $npwrm,
-        'cases'        => $cases,
-    ];
+    $casesBySec[$sid] = $c;
 }
 
-// Sort by section name
-usort($mpsPerSection, fn($a,$b) => strcmp($a['section_name'], $b['section_name']));
+// ---- Grand totals for KPIs ----
+$grandCases = 0; $grandFx = 0;
+foreach ($sfRows as $r) {
+    $grandCases += (int)$r['frequency'];
+    $grandFx    += (int)$r['frequency'] * (int)$r['score'];
+}
+$totalExaminees = $grandCases;
 
-// ---- MPS per Subject / Grade ----
+// ---- MPS per Subject ----
 $subjectMap = [];
 foreach ($sfRows as $r) {
-    $aId = (int)$r['assessment_id'];
-    $asmt = array_values(array_filter($assessments, fn($a) => (int)$a['id'] === $aId))[0] ?? null;
+    $aId  = (int)$r['assessment_id'];
+    $asmt = $asmtById[$aId] ?? null;
     if (!$asmt) continue;
-    $key = $asmt['subject_name'] . '|' . $asmt['grade_level'];
+    $key = $asmt['subject_name'];
     if (!isset($subjectMap[$key])) {
-        $subjectMap[$key] = ['subject_name'=>$asmt['subject_name'],'grade_level'=>$asmt['grade_level'],'cases'=>0,'fx'=>0,'ti'=>(int)$asmt['total_items']];
+        $subjectMap[$key] = ['subject_name'=>$asmt['subject_name'],'cases'=>0,'fx'=>0,'ti'=>(int)$asmt['total_items']];
     }
     $subjectMap[$key]['cases'] += (int)$r['frequency'];
     $subjectMap[$key]['fx']    += (int)$r['frequency'] * (int)$r['score'];
@@ -172,7 +143,6 @@ foreach ($subjectMap as $entry) {
     $mps  = ($entry['cases'] > 0 && $entry['ti'] > 0) ? $mean / $entry['ti'] * 100 : 0;
     $mpsPerSubject[] = [
         'subject_name' => $entry['subject_name'],
-        'grade_level'  => $entry['grade_level'],
         'mps'          => round($mps, 2),
     ];
 }
@@ -181,7 +151,7 @@ foreach ($subjectMap as $entry) {
 $gradeMap = [];
 foreach ($sfRows as $r) {
     $aId  = (int)$r['assessment_id'];
-    $asmt = array_values(array_filter($assessments, fn($a) => (int)$a['id'] === $aId))[0] ?? null;
+    $asmt = $asmtById[$aId] ?? null;
     if (!$asmt) continue;
     $grade = (int)$asmt['grade_level'];
     if (!isset($gradeMap[$grade])) {
@@ -198,6 +168,29 @@ foreach ($gradeMap as $grade => $d) {
 }
 usort($mpsPerGrade, fn($a, $b) => $a['grade_level'] <=> $b['grade_level']);
 
+// ---- Score Band Distribution per Grade Level ----
+$SCORE_BANDS = ['98-100','95-97','90-94','85-89','80-84','75-79','Below 75'];
+$bandByGrade = [];
+foreach ($sfRows as $r) {
+    $aId  = (int)$r['assessment_id'];
+    $asmt = $asmtById[$aId] ?? null;
+    if (!$asmt) continue;
+    $grade = (int)$asmt['grade_level'];
+    $ti    = (int)$asmt['total_items'];
+    $pct   = $ti > 0 ? (int)$r['score'] / $ti * 100 : 0;
+    $band  = get_score_band($pct);
+    $freq  = (int)$r['frequency'];
+    if (!isset($bandByGrade[$grade])) {
+        $bandByGrade[$grade] = array_fill_keys($SCORE_BANDS, 0);
+    }
+    $bandByGrade[$grade][$band] += $freq;
+}
+ksort($bandByGrade);
+$bandDistribution = [];
+foreach ($bandByGrade as $grade => $bands) {
+    $bandDistribution[] = ['grade_level' => $grade, 'bands' => $bands];
+}
+
 // ---- Item Analysis ----
 $iccStmt = $pdo->prepare(
     "SELECT icc.assessment_id, icc.section_id, icc.item_no, icc.correct_count,
@@ -210,26 +203,17 @@ $iccStmt = $pdo->prepare(
 $iccStmt->execute($sfParams);
 $iccRows = $iccStmt->fetchAll();
 
-// Cases per section (reuse from secData)
-$casesBySec = [];
-foreach ($secData as $sid => $sec) {
-    $c = 0;
-    foreach ($sec['assessments'] as $ad) {
-        foreach ($ad['rows'] as $row) $c += $row['frequency'];
-    }
-    $casesBySec[$sid] = $c;
-}
-
-// Item totals
-$itemTotals = [];   // item_no → [total_correct, total_cases]
-$itemBySec  = [];   // section_id → item_no → correct_count
+// Item totals — use casesByAsmtSec for accurate per-row denominator
+$itemTotals = [];
+$itemBySec  = [];
 foreach ($iccRows as $r) {
+    $aId = (int)$r['assessment_id'];
     $sid = (int)$r['section_id'];
     $ino = (int)$r['item_no'];
     $cnt = (int)$r['correct_count'];
     $itemBySec[$sid][$ino] = ($itemBySec[$sid][$ino] ?? 0) + $cnt;
     $itemTotals[$ino]['correct'] = ($itemTotals[$ino]['correct'] ?? 0) + $cnt;
-    $itemTotals[$ino]['cases']   = ($itemTotals[$ino]['cases']   ?? 0) + ($casesBySec[$sid] ?? 0);
+    $itemTotals[$ino]['cases']   = ($itemTotals[$ino]['cases']   ?? 0) + ($casesByAsmtSec[$aId][$sid] ?? 0);
 }
 
 $maxItem = !empty($iccRows) ? max(array_column($iccRows, 'item_no')) : 0;
@@ -302,16 +286,15 @@ $aicStmt = $pdo->prepare(
 $aicStmt->execute($asmtIds);
 $aicRows = $aicStmt->fetchAll();
 
-// Build (assessment_id, item_no) → competency_id lookup
-$itemCompLookup = [];  // [aId][item_no] = competency_id
-$compInfo       = [];  // competency_id → {code, description}
+$itemCompLookup = [];
+$compInfo       = [];
 foreach ($aicRows as $r) {
     $itemCompLookup[$r['assessment_id']][$r['item_no']] = (int)$r['competency_id'];
     $compInfo[$r['competency_id']] = ['code' => $r['code'], 'description' => $r['description']];
 }
 
-// Aggregate correct counts and cases per competency
-$compStats = [];  // competency_id → {total_correct, total_possible, section_ids}
+// Aggregate per competency — use casesByAsmtSec for accurate denominators
+$compStats = [];
 foreach ($iccRows as $r) {
     $aId  = (int)$r['assessment_id'];
     $ino  = (int)$r['item_no'];
@@ -320,11 +303,12 @@ foreach ($iccRows as $r) {
     if ($comp === null) continue;
 
     if (!isset($compStats[$comp])) {
-        $compStats[$comp] = ['total_correct' => 0, 'total_possible' => 0, 'section_ids' => []];
+        $compStats[$comp] = ['total_correct' => 0, 'total_possible' => 0, 'section_ids' => [], 'items' => []];
     }
     $compStats[$comp]['total_correct']    += (int)$r['correct_count'];
-    $compStats[$comp]['total_possible']   += $casesBySec[$sid] ?? 0;
+    $compStats[$comp]['total_possible']   += $casesByAsmtSec[$aId][$sid] ?? 0;
     $compStats[$comp]['section_ids'][$sid] = true;
+    $compStats[$comp]['items'][$ino]       = true;
 }
 
 $leastMasteredCompetencies = [];
@@ -341,15 +325,15 @@ foreach ($compStats as $compId => $cs) {
         'total_correct'  => $cs['total_correct'],
         'total_possible' => $cs['total_possible'],
         'section_count'  => count($cs['section_ids']),
+        'item_count'     => count($cs['items']),
     ];
 }
 usort($leastMasteredCompetencies, fn($a, $b) => $a['pct'] <=> $b['pct']);
 
 json_response([
-    'mps_per_section'              => $mpsPerSection,
     'mps_per_grade'                => $mpsPerGrade,
     'mps_per_subject'              => $mpsPerSubject,
-    'mastery_distribution'         => $masteryDistribution,
+    'band_distribution'            => $bandDistribution,
     'least_mastered_items'         => $leastMastered,
     'least_mastered_competencies'  => $leastMasteredCompetencies,
     'item_heatmap'                 => [
@@ -358,7 +342,6 @@ json_response([
         'data'     => $heatData,
     ],
     'mps_trend'                    => $mpsTrend,
-    'npwrm_per_section'            => $npwrmPerSection,
     'kpis'                         => [
         'overall_mps'     => round($overallMps, 2),
         'total_examinees' => $totalExaminees,

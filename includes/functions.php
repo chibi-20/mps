@@ -271,6 +271,22 @@ function compute_item_total(int $assessment_id, int $section_id): int
 // Input validation helpers
 // ============================================================
 
+/**
+ * Classify a score percentage into one of 7 performance bands.
+ * Used by both the band-distribution chart (get_dashboard_data.php)
+ * and the JS scoreBand() mirror function.
+ */
+function get_score_band(float $pct): string
+{
+    if ($pct >= 98) return '98-100';
+    if ($pct >= 95) return '95-97';
+    if ($pct >= 90) return '90-94';
+    if ($pct >= 85) return '85-89';
+    if ($pct >= 80) return '80-84';
+    if ($pct >= 75) return '75-79';
+    return 'Below 75';
+}
+
 function validate_int(mixed $val, int $min = 0, int $max = PHP_INT_MAX): ?int
 {
     if (!is_numeric($val)) return null;

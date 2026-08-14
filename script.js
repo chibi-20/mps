@@ -22,6 +22,28 @@ function pctColor(pct) {
     return 'pct-green';
 }
 
+// Score-band classifier — mirrors PHP get_score_band()
+function scoreBand(pct) {
+    if (pct >= 98) return '98-100';
+    if (pct >= 95) return '95-97';
+    if (pct >= 90) return '90-94';
+    if (pct >= 85) return '85-89';
+    if (pct >= 80) return '80-84';
+    if (pct >= 75) return '75-79';
+    return 'Below 75';
+}
+
+const SCORE_BAND_ORDER  = ['98-100','95-97','90-94','85-89','80-84','75-79','Below 75'];
+const SCORE_BAND_COLORS = {
+    '98-100':   '#1b4332',
+    '95-97':    '#2d6a4f',
+    '90-94':    '#40916c',
+    '85-89':    '#52b788',
+    '80-84':    '#74c69d',
+    '75-79':    '#b7e4c7',
+    'Below 75': '#e55934',
+};
+
 function bandForScore(score, totalItems) {
     if (totalItems <= 0) return 'ANM';
     const pct = score / totalItems * 100;
@@ -962,23 +984,63 @@ async function saveData(action) {
 
 const charts = {};
 
+function showDashboardEmptyState() {
+    const empty   = document.getElementById('dashboardEmptyState');
+    const content = document.getElementById('dashboardContent');
+    const btn     = document.getElementById('btnRefresh');
+    const btnExp  = document.getElementById('btnExportSubject');
+    if (empty)   empty.style.display   = '';
+    if (content) content.style.display = 'none';
+    if (btn)     btn.disabled          = true;
+    if (btnExp)  btnExp.disabled       = true;
+}
+
+function showDashboardContent() {
+    const empty   = document.getElementById('dashboardEmptyState');
+    const content = document.getElementById('dashboardContent');
+    const btn     = document.getElementById('btnRefresh');
+    const btnExp  = document.getElementById('btnExportSubject');
+    if (empty)   empty.style.display   = 'none';
+    if (content) content.style.display = '';
+    if (btn)     btn.disabled          = false;
+    if (btnExp)  btnExp.disabled       = false;
+}
+
+function exportSubjectReport() {
+    const subject = document.getElementById('f_subject')?.value || '';
+    if (!subject) return;
+    const p = new URLSearchParams({ subject });
+    const sy      = document.getElementById('f_sy')?.value      || '';
+    const term    = document.getElementById('f_term')?.value    || '';
+    const grade   = document.getElementById('f_grade')?.value   || '';
+    const section = document.getElementById('f_section')?.value || '';
+    if (sy)      p.set('sy',      sy);
+    if (term)    p.set('term',    term);
+    if (grade)   p.set('grade',   grade);
+    if (section) p.set('section', section);
+    window.location.href = BASE_URL + 'api/export_subject_report.php?' + p.toString();
+}
+
 async function refreshDashboard() {
+    const subjectName = document.getElementById('f_subject')?.value || '';
+    if (!subjectName) { showDashboardEmptyState(); return; }
+
     const params = new URLSearchParams({
         sy:         document.getElementById('f_sy')?.value         || '',
         term:       document.getElementById('f_term')?.value       || '',
         grade:      document.getElementById('f_grade')?.value      || '',
-        subject:    document.getElementById('f_subject')?.value    || '',
+        subject:    subjectName,
         section:    document.getElementById('f_section')?.value    || '',
         assessment: document.getElementById('f_assessment')?.value || '',
     });
     const data = await apiGet(`api/get_dashboard_data.php?${params}`);
     if (!data || data.error) { showToast('Failed to load dashboard data.', 'error'); return; }
 
+    showDashboardContent();
     renderKpis(data.kpis);
     renderChart('chartMpsSubject',   buildMpsSubjectChart(data));
     renderChart('chartMpsGrade',     buildMpsGradeChart(data));
-    renderChart('chartMastery',      buildMasteryChart(data));
-    renderChart('chartNpwrm',        buildNpwrmChart(data));
+    renderBandDistPies(data);
     renderChart('chartLeastMastered',buildLeastMasteredChart(data));
     renderChart('chartMpsTrend',     buildMpsTrendChart(data));
     renderHeatmap(data.item_heatmap);
@@ -1012,7 +1074,7 @@ function buildMpsSubjectChart(data) {
     return {
         type: 'bar',
         data: {
-            labels: d.map(r => r.subject_name + ' G' + r.grade_level),
+            labels: d.map(r => r.subject_name),
             datasets: [{
                 label: 'MPS %',
                 data:  d.map(r => +r.mps),
@@ -1020,6 +1082,7 @@ function buildMpsSubjectChart(data) {
             }],
         },
         options: {
+            maintainAspectRatio: false,
             plugins: {
                 legend: { display: false },
                 annotation: {
@@ -1044,6 +1107,7 @@ function buildMpsGradeChart(data) {
             }],
         },
         options: {
+            maintainAspectRatio: false,
             plugins: {
                 legend: { display: false },
                 annotation: {
@@ -1055,40 +1119,90 @@ function buildMpsGradeChart(data) {
     };
 }
 
-function buildMasteryChart(data) {
-    const d = data.mastery_distribution || [];
-    const colors = { M:'#1a7a4a', CAM:'#52b788', MTM:'#95d5b2', AVR:'#ffd166', LM:'#ef8c44', VLM:'#e55934', ANM:'#9d0208' };
-    return {
-        type: 'bar',
-        data: {
-            labels: d.map(r => r.section_name),
-            datasets: BAND_KEYS.map(bk => ({
-                label: bk,
-                data:  d.map(r => +(r.bands?.[bk] || 0)),
-                backgroundColor: colors[bk],
-            })),
-        },
-        options: {
-            plugins: { legend: { position: 'bottom' } },
-            scales: { x: { stacked:true }, y: { stacked:true, min:0, max:100 } },
-        },
-    };
-}
+function renderBandDistPies(data) {
+    const piesEl   = document.getElementById('bandDistPies');
+    const legendEl = document.getElementById('bandDistLegend');
+    if (!piesEl) return;
 
-function buildNpwrmChart(data) {
-    const d = data.npwrm_per_section || [];
-    return {
-        type: 'bar',
-        data: {
-            labels: d.map(r => r.section_name),
-            datasets: [{
-                label: 'NPWRM',
-                data:  d.map(r => +r.npwrm),
-                backgroundColor: THEME.maroon,
-            }],
-        },
-        options: { scales: { y: { beginAtZero: true } } },
-    };
+    // Destroy previous pie instances
+    Object.keys(charts).filter(k => k.startsWith('bandPie_')).forEach(k => {
+        charts[k].destroy();
+        delete charts[k];
+    });
+    piesEl.innerHTML = '';
+
+    const grades = (data.band_distribution || []).filter(g =>
+        SCORE_BAND_ORDER.some(b => (g.bands[b] || 0) > 0)
+    );
+
+    if (!grades.length) {
+        piesEl.innerHTML = '<p class="text-muted" style="padding:.5rem">No data.</p>';
+        if (legendEl) legendEl.innerHTML = '';
+        return;
+    }
+
+    grades.forEach(gradeRow => {
+        const total = SCORE_BAND_ORDER.reduce((s, b) => s + (gradeRow.bands[b] || 0), 0);
+        if (!total) return;
+
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:.35rem';
+
+        const gradeLabel = document.createElement('p');
+        gradeLabel.textContent = 'Grade ' + gradeRow.grade_level;
+        gradeLabel.style.cssText = 'margin:0;font-weight:600;font-size:.875rem;color:var(--maroon-dark)';
+
+        const canvasWrap = document.createElement('div');
+        canvasWrap.style.cssText = 'position:relative;width:210px;height:210px';
+        const canvas = document.createElement('canvas');
+        canvasWrap.appendChild(canvas);
+
+        wrap.appendChild(gradeLabel);
+        wrap.appendChild(canvasWrap);
+        piesEl.appendChild(wrap);
+
+        const key = 'bandPie_' + gradeRow.grade_level;
+        charts[key] = new Chart(canvas, {
+            type: 'pie',
+            data: {
+                labels: SCORE_BAND_ORDER,
+                datasets: [{
+                    data: SCORE_BAND_ORDER.map(b => gradeRow.bands[b] || 0),
+                    backgroundColor: SCORE_BAND_ORDER.map(b => SCORE_BAND_COLORS[b]),
+                    borderWidth: 2,
+                    borderColor: '#fff',
+                }],
+            },
+            options: {
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: item => {
+                                const count = item.raw;
+                                const pct   = total > 0 ? (count / total * 100).toFixed(1) : '0.0';
+                                return ` ${item.label}: ${count} student${count !== 1 ? 's' : ''} (${pct}%)`;
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    });
+
+    // Shared legend (one row, all 7 bands)
+    if (legendEl) {
+        legendEl.innerHTML = `
+            <div style="display:flex;flex-wrap:wrap;gap:.4rem 1.1rem;justify-content:center;font-size:.8rem;color:var(--c-text)">
+                ${SCORE_BAND_ORDER.map(b => `
+                    <span style="display:inline-flex;align-items:center;gap:.3rem">
+                        <span style="display:inline-block;width:12px;height:12px;border-radius:2px;
+                              background:${SCORE_BAND_COLORS[b]};flex-shrink:0;border:1px solid rgba(0,0,0,.1)"></span>
+                        ${b}
+                    </span>`).join('')}
+            </div>`;
+    }
 }
 
 function buildLeastMasteredChart(data) {
@@ -1097,11 +1211,12 @@ function buildLeastMasteredChart(data) {
         type: 'bar',
         data: {
             labels: d.map(r => 'Item ' + r.item_no),
-            datasets: [{ label: '% Correct', data: d.map(r => +r.pct), backgroundColor: '#e55934' }],
+            datasets: [{ label: '% Correct', data: d.map(r => +r.pct), backgroundColor: d.map(r => +r.pct < 50 ? '#e55934' : +r.pct < 75 ? '#f0a500' : '#52b788') }],
         },
         options: {
+            maintainAspectRatio: false,
             indexAxis: 'y',
-            scales: { x: { min:0, max:100 } },
+            scales: { x: { min:0, max:100, ticks: { callback: v => v + '%' } } },
             plugins: { legend: { display:false } },
         },
     };
@@ -1119,7 +1234,10 @@ function buildMpsTrendChart(data) {
                 borderColor: THEME.maroon, fill: false, tension: 0.3,
             }],
         },
-        options: { scales: { y: { min:0, max:100 } } },
+        options: {
+            maintainAspectRatio: false,
+            scales: { y: { min:0, max:100 } },
+        },
     };
 }
 
@@ -1480,8 +1598,8 @@ function escHtml(s) {
 
 // ---- FILTER DEPENDENCY: populate section + assessment dropdowns ----
 async function updateFilterDependents() {
-    const sy      = document.getElementById('f_sy')?.value || '';
-    const grade   = document.getElementById('f_grade')?.value || '';
+    const sy      = document.getElementById('f_sy')?.value      || '';
+    const grade   = document.getElementById('f_grade')?.value   || '';
     const subject = document.getElementById('f_subject')?.value || '';
     const params  = new URLSearchParams({ sy, grade, subject });
     const data    = await apiGet(`api/get_filter_options.php?${params}`);
@@ -1516,15 +1634,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (document.getElementById('panel-analytics')) {
         // f_sy / f_grade / f_subject have NO inline onchange — handled here so that
         // updateFilterDependents() always runs before refreshDashboard(), keeping the
-        // Sections dropdown in sync with the selected Grade before the API call fires.
+        // Section/Assessment dropdowns in sync before the API call fires.
         ['f_sy', 'f_grade', 'f_subject'].forEach(id => {
             document.getElementById(id)?.addEventListener('change', async () => {
                 await updateFilterDependents();
-                refreshDashboard();
+                refreshDashboard(); // no-ops and shows empty state if no subject selected
             });
         });
-        // Initial load
-        updateFilterDependents().then(() => refreshDashboard());
+        // On initial load: populate dependent dropdowns, then show empty state (no auto-fetch).
+        updateFilterDependents().then(() => showDashboardEmptyState());
     }
 
     // Teacher dashboard: "+ New" button opens the select-assessment panel
@@ -2004,6 +2122,28 @@ async function doCreateAssessment() {
 // ADMIN: COMPETENCY ANALYTICS CHART + DRILL-DOWN TABLE
 // ============================================================
 
+// Inline Chart.js plugin — draws % labels outside each bar in the competency chart
+const _compDatalabelPlugin = {
+    id: 'compDatalabels',
+    afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        chart.data.datasets.forEach((ds, i) => {
+            chart.getDatasetMeta(i).data.forEach((bar, j) => {
+                const val = ds.data[j];
+                if (val === null || val === undefined) return;
+                const text = val.toFixed(1) + '%';
+                ctx.save();
+                ctx.font = 'bold 11px system-ui,sans-serif';
+                ctx.fillStyle = '#333';
+                ctx.textAlign  = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(text, bar.x + 5, bar.y);
+                ctx.restore();
+            });
+        });
+    },
+};
+
 function renderCompetencySection(data) {
     const rows    = data.least_mastered_competencies || [];
     const cardEl  = document.getElementById('compChartCard');
@@ -2014,10 +2154,17 @@ function renderCompetencySection(data) {
 
     cardEl.style.display = '';
 
+    // Update subtitle note
+    const noteEl = document.getElementById('compChartNote');
+    if (noteEl) {
+        const extra = rows.length > 10 ? ` — showing 10 lowest of ${rows.length}` : '';
+        noteEl.textContent = `(items with competency mapping only${extra})`;
+    }
+
     // Chart: top 10 least mastered
     const chartData = rows.slice(0, 10);
     const labels  = chartData.map(r => r.code || r.description.substring(0, 30) + '…');
-    const values  = chartData.map(r => r.pct);
+    const values  = chartData.map(r => +r.pct);
     const colors  = values.map(v => v < 50 ? '#e55934' : v < 75 ? '#f0a500' : '#2d6a4f');
 
     renderChart('chartCompetency', {
@@ -2032,34 +2179,39 @@ function renderCompetencySection(data) {
             }],
         },
         options: {
+            maintainAspectRatio: false,
             indexAxis: 'y',
             responsive: true,
+            layout: { padding: { right: 52 } },
             plugins: {
                 legend: { display: false },
                 tooltip: {
                     callbacks: {
-                        title: (items) => {
+                        title: items => {
                             const row = chartData[items[0].dataIndex];
                             return (row.code ? row.code + ' — ' : '') + row.description;
                         },
-                        label: (item) => ` ${item.raw.toFixed(2)}%`,
+                        label: item => {
+                            const row = chartData[item.dataIndex];
+                            return [
+                                ` % Correct: ${(+row.pct).toFixed(2)}%`,
+                                ` Items mapped: ${row.item_count ?? '?'}`,
+                                ` Sections: ${row.section_count}`,
+                            ];
+                        },
                     },
                 },
             },
             scales: {
                 x: {
                     min: 0, max: 100,
+                    grid: { display: true },
                     ticks: { callback: v => v + '%' },
                 },
-            },
-            annotation: {
-                annotations: [{
-                    type: 'line', xMin: 75, xMax: 75, borderColor: '#e07b00',
-                    borderWidth: 2, borderDash: [4, 4],
-                    label: { content: '75% target', display: true, position: 'start', font: { size: 10 } },
-                }],
+                y: { grid: { display: false } },
             },
         },
+        plugins: [_compDatalabelPlugin],
     });
 
     // Drill-down table

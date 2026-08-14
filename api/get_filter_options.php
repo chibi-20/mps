@@ -9,11 +9,11 @@ require_once __DIR__ . '/../includes/functions.php';
 require_login('admin');
 $pdo = get_pdo();
 
-$syId    = validate_int($_GET['sy']      ?? null, 1);
-$grade   = validate_int($_GET['grade']   ?? null, 1);
+$syId    = validate_int($_GET['sy']    ?? null, 1);
+$grade   = validate_int($_GET['grade'] ?? null, 1);
 $subject = validate_string($_GET['subject'] ?? '', 100) ?: null;
 
-// Sections
+// Sections — scoped by SY and Grade only (subject name alone can't narrow sections)
 $secWhere  = ['1=1'];
 $secParams = [];
 if ($syId)  { $secWhere[] = 'sec.school_year_id = ?'; $secParams[] = $syId; }
@@ -23,7 +23,7 @@ $secStmt = $pdo->prepare($secSQL);
 $secStmt->execute($secParams);
 $sections = $secStmt->fetchAll();
 
-// Assessments
+// Assessments — scoped by SY, Grade, and Subject name
 $aWhere  = ["a.status IN ('submitted','approved')"];
 $aParams = [];
 if ($syId)   { $aWhere[] = 't.school_year_id = ?'; $aParams[] = $syId; }
