@@ -749,6 +749,8 @@ const BAND_COLORS     = {
 };
 const SUBJECTS_ALL    = <?= json_encode($subjectsAll) ?>;
 const ALL_TERMS       = <?= json_encode($allTerms) ?>;
+const AVAILABLE_SUBJECTS_LIST     = <?= json_encode(AVAILABLE_SUBJECTS) ?>;
+const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
 </script>
 <!-- ============================================================
      MODAL: RESET TEACHER PASSWORD
@@ -792,6 +794,32 @@ const ALL_TERMS       = <?= json_encode($allTerms) ?>;
                 <button class="btn btn-outline" onclick="copyTempPwd()">Copy Password</button>
                 <button class="btn btn-primary" onclick="closeResetModal()">Done</button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: EDIT TEACHER (grade levels / subjects)
+============================================================ -->
+<div id="editTeacherModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeEditTeacherModal()">
+    <div class="modal-box" style="max-width:520px">
+        <h3 style="color:var(--maroon-dark);margin-bottom:.25rem">Edit Teacher</h3>
+        <p style="font-size:.875rem;color:var(--c-muted);margin-bottom:1rem">
+            <strong id="editTeacherName"></strong> &middot; <code id="editTeacherUsername"></code>
+        </p>
+
+        <div class="form-group">
+            <label>Grade Level(s) Taught <span class="req">*</span></label>
+            <div class="checklist" id="editGradeChecklist"></div>
+        </div>
+        <div class="form-group" style="margin-top:.9rem">
+            <label>Subject(s) Taught <span class="req">*</span></label>
+            <div class="checklist checklist--grid" id="editSubjectChecklist"></div>
+        </div>
+
+        <div style="display:flex;gap:.75rem;margin-top:1.5rem;justify-content:flex-end">
+            <button class="btn btn-outline" onclick="closeEditTeacherModal()">Cancel</button>
+            <button class="btn btn-primary" id="btnSaveTeacherEdit" onclick="saveTeacherEdit()">Save Changes</button>
         </div>
     </div>
 </div>

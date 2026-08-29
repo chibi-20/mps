@@ -1370,6 +1370,7 @@ function renderTeacherTable(tbodyId, rows, isPending) {
             <td class="text-left">${escHtml(r.subjects)}</td>
             ${isPending ? `<td>${escHtml(r.created_at || '')}</td>` : ''}
             <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-outline" onclick="openEditTeacherModal(${r.id})" style="margin-right:.3rem">Edit</button>
                 ${isPending
                   ? `<button class="btn btn-sm btn-success" onclick="manageTeacher(${r.id},'approve')">Approve</button>`
                   : `<button class="btn btn-sm btn-outline"
@@ -1470,6 +1471,61 @@ async function manageTeacher(id, action) {
     const r = await apiPost('api/manage_teacher.php', { teacher_id: id, action });
     if (r.error) { showToast(r.error,'error'); return; }
     showToast(action === 'approve' ? 'Teacher approved.' : 'Teacher deactivated.');
+    loadTeachers();
+}
+
+// ---- Edit Teacher (grade levels / subjects) ----
+let _editTeacherId = null;
+
+async function openEditTeacherModal(id) {
+    const data = await apiGet(`api/get_teacher_profile.php?teacher_id=${id}`);
+    if (data.error) { showToast(data.error, 'error'); return; }
+
+    _editTeacherId = id;
+    document.getElementById('editTeacherName').textContent     = data.display_name;
+    document.getElementById('editTeacherUsername').textContent = data.username;
+
+    const gradeWrap = document.getElementById('editGradeChecklist');
+    gradeWrap.innerHTML = AVAILABLE_GRADE_LEVELS_LIST.map(gl => `
+        <label class="check-item">
+            <input type="checkbox" name="edit_grade_levels" value="${gl}"${data.grade_levels.includes(gl) ? ' checked' : ''}>
+            Grade ${gl}
+        </label>`).join('');
+
+    const subjWrap = document.getElementById('editSubjectChecklist');
+    subjWrap.innerHTML = AVAILABLE_SUBJECTS_LIST.map(sn => `
+        <label class="check-item">
+            <input type="checkbox" name="edit_subjects" value="${escHtml(sn)}"${data.subjects.includes(sn) ? ' checked' : ''}>
+            ${escHtml(sn)}
+        </label>`).join('');
+
+    document.getElementById('editTeacherModal').style.display = 'flex';
+}
+
+function closeEditTeacherModal() {
+    document.getElementById('editTeacherModal').style.display = 'none';
+    _editTeacherId = null;
+}
+
+async function saveTeacherEdit() {
+    if (!_editTeacherId) return;
+    const grade_levels = [...document.querySelectorAll('input[name="edit_grade_levels"]:checked')].map(cb => +cb.value);
+    const subjects      = [...document.querySelectorAll('input[name="edit_subjects"]:checked')].map(cb => cb.value);
+    if (!grade_levels.length) { showToast('Select at least one grade level.', 'error'); return; }
+    if (!subjects.length)     { showToast('Select at least one subject.', 'error'); return; }
+
+    const btn = document.getElementById('btnSaveTeacherEdit');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+    const r = await apiPost('api/update_teacher_profile.php', {
+        teacher_id: _editTeacherId, grade_levels, subjects,
+    });
+    btn.disabled = false;
+    btn.textContent = 'Save Changes';
+
+    if (r.error) { showToast(r.error, 'error'); return; }
+    showToast('Teacher updated.');
+    closeEditTeacherModal();
     loadTeachers();
 }
 
