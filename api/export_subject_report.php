@@ -423,6 +423,11 @@ if ($termId && count($termNames) === 1) {
 // Batch data loading (single pass each — no N+1 queries)
 // ============================================================
 
+// Sections whose data is actually submitted/approved (see get_qualifying_sections()
+// docblock) — score frequencies and item counts below are filtered through this
+// so a teacher's un-submitted draft never ends up in the exported report.
+$qualifying = get_qualifying_sections($pdo, $asmtIds);
+
 // Sections assigned to each assessment
 $asmtSecStmt = $pdo->prepare(
     'SELECT as_.assessment_id, sec.id AS section_id, sec.name AS section_name
@@ -455,6 +460,7 @@ $casesByAsmtSec = [];  // [aId][sId] = total cases
 foreach ($sfStmt->fetchAll() as $r) {
     $aId  = (int)$r['assessment_id'];
     $sid  = (int)$r['section_id'];
+    if (!isset($qualifying[$aId][$sid])) continue;
     $freq = (int)$r['frequency'];
     $sfByAsmt[$aId][$sid][(int)$r['score']] = $freq;
     $casesByAsmtSec[$aId][$sid] = ($casesByAsmtSec[$aId][$sid] ?? 0) + $freq;
@@ -470,7 +476,10 @@ $iccStmt->execute($sfParams);
 
 $iccByAsmt = [];  // [aId][sId][itemNo] = correct_count
 foreach ($iccStmt->fetchAll() as $r) {
-    $iccByAsmt[(int)$r['assessment_id']][(int)$r['section_id']][(int)$r['item_no']] = (int)$r['correct_count'];
+    $aId = (int)$r['assessment_id'];
+    $sid = (int)$r['section_id'];
+    if (!isset($qualifying[$aId][$sid])) continue;
+    $iccByAsmt[$aId][$sid][(int)$r['item_no']] = (int)$r['correct_count'];
 }
 
 // Competency mappings

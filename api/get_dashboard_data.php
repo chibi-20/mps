@@ -66,6 +66,10 @@ foreach ($assessments as $a) $asmtById[(int)$a['id']] = $a;
 $asmtIds    = array_column($assessments, 'id');
 $totalItems = (int)($assessments[0]['total_items'] ?? 40);
 
+// Sections whose data is actually submitted/approved (see get_qualifying_sections()
+// docblock) — everything below is filtered through this so drafts never leak in.
+$qualifying = get_qualifying_sections($pdo, $asmtIds);
+
 // ---- Load raw score frequencies ----
 $in = implode(',', array_fill(0, count($asmtIds), '?'));
 $sfStmt = $pdo->prepare(
@@ -79,7 +83,10 @@ $sfStmt = $pdo->prepare(
 $sfParams = $asmtIds;
 if ($sectionId) $sfParams[] = $sectionId;
 $sfStmt->execute($sfParams);
-$sfRows = $sfStmt->fetchAll();
+$sfRows = array_values(array_filter(
+    $sfStmt->fetchAll(),
+    fn($r) => isset($qualifying[(int)$r['assessment_id']][(int)$r['section_id']])
+));
 
 // Cases per (assessment_id, section_id) — accurate denominator for per-row computations
 $casesByAsmtSec = [];
@@ -201,7 +208,10 @@ $iccStmt = $pdo->prepare(
     . ($sectionId ? " AND icc.section_id = ?" : "")
 );
 $iccStmt->execute($sfParams);
-$iccRows = $iccStmt->fetchAll();
+$iccRows = array_values(array_filter(
+    $iccStmt->fetchAll(),
+    fn($r) => isset($qualifying[(int)$r['assessment_id']][(int)$r['section_id']])
+));
 
 // Item totals — use casesByAsmtSec for accurate per-row denominator
 $itemTotals = [];

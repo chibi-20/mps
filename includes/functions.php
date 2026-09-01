@@ -267,6 +267,54 @@ function compute_item_total(int $assessment_id, int $section_id): int
     return (int)$stmt->fetchColumn();
 }
 
+/**
+ * Which (assessment_id, section_id) pairs are legitimate to aggregate into
+ * reports/dashboards. score_frequencies / item_correct_counts are written as
+ * soon as a teacher hits Save Draft (not just Submit), and for shared
+ * assessments assessments.status stays 'approved' the whole time it's open
+ * for encoding — the real per-teacher progress lives in
+ * teacher_assessment_encodings.status. Without this filter, any section a
+ * teacher has ever draft-saved gets counted alongside genuinely submitted
+ * ones. Legacy (is_shared=0) assessments are unaffected: one teacher owns
+ * the whole assessment, so the caller's own status filter on `assessments`
+ * already covers every one of its sections.
+ *
+ * @param int[] $asmtIds
+ * @return array<int, array<int, true>> [assessment_id => [section_id => true]]
+ */
+function get_qualifying_sections(PDO $pdo, array $asmtIds): array
+{
+    if (empty($asmtIds)) return [];
+    $in = implode(',', array_fill(0, count($asmtIds), '?'));
+
+    $stmt = $pdo->prepare(
+        "SELECT DISTINCT asec.assessment_id, asec.section_id
+         FROM assessment_sections asec
+         JOIN assessments a ON a.id = asec.assessment_id
+         JOIN terms t ON t.id = a.term_id
+         WHERE asec.assessment_id IN ({$in})
+           AND (
+                a.is_shared = 0
+                OR EXISTS (
+                    SELECT 1 FROM teacher_assignments ta
+                    JOIN teacher_assessment_encodings tae
+                      ON tae.teacher_id = ta.teacher_id AND tae.assessment_id = asec.assessment_id
+                    WHERE ta.section_id     = asec.section_id
+                      AND ta.subject_id     = a.subject_id
+                      AND ta.school_year_id = t.school_year_id
+                      AND tae.status IN ('submitted','approved')
+                )
+           )"
+    );
+    $stmt->execute($asmtIds);
+
+    $out = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $out[(int)$r['assessment_id']][(int)$r['section_id']] = true;
+    }
+    return $out;
+}
+
 // ============================================================
 // Input validation helpers
 // ============================================================
