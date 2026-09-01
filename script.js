@@ -1283,8 +1283,8 @@ async function loadSubmissions() {
             <td><span class="status-chip status-${row.status}">${row.status}</span></td>
             <td>
                 ${row.status === 'submitted' ? `
-                <button class="btn btn-sm btn-success" onclick="approveAssessment(${row.id})">Approve</button>
-                <button class="btn btn-sm btn-warning" onclick="openReturnModal(${row.id})">Return</button>
+                <button class="btn btn-sm btn-success" onclick="approveAssessment(${row.id},${row.teacher_id ?? 'null'})">Approve</button>
+                <button class="btn btn-sm btn-warning" onclick="openReturnModal(${row.id},${row.teacher_id ?? 'null'})">Return</button>
                 ` : ''}
                 <button class="btn btn-sm btn-danger"
                         data-aid="${row.id}"
@@ -1295,9 +1295,9 @@ async function loadSubmissions() {
     });
 }
 
-async function approveAssessment(id) {
+async function approveAssessment(id, teacherId) {
     if (!confirm('Approve this assessment?')) return;
-    const r = await apiPost('api/approve_assessment.php', { assessment_id: id, action: 'approve' });
+    const r = await apiPost('api/approve_assessment.php', { assessment_id: id, teacher_id: teacherId, action: 'approve' });
     if (r.error) { showToast(r.error,'error'); return; }
     showToast('Assessment approved.');
     loadSubmissions();
@@ -1315,8 +1315,9 @@ async function adminDeleteAssessment(btn) {
     refreshDashboard();
 }
 
-function openReturnModal(id) {
+function openReturnModal(id, teacherId) {
     document.getElementById('returnAsmtId').value = id;
+    document.getElementById('returnAsmtTeacherId').value = teacherId ?? '';
     document.getElementById('returnModal').style.display = 'flex';
 }
 
@@ -1331,6 +1332,7 @@ if (frmReturn) {
         const fd = new FormData(frmReturn);
         const r  = await apiPost('api/approve_assessment.php', {
             assessment_id: fd.get('assessment_id'),
+            teacher_id: fd.get('teacher_id') || null,
             action: 'return',
             remarks: fd.get('remarks'),
         });

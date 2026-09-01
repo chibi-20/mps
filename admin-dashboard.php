@@ -229,6 +229,7 @@ unset($_t);
             <h3>Return with Remarks</h3>
             <form id="frmReturn">
                 <input type="hidden" id="returnAsmtId" name="assessment_id">
+                <input type="hidden" id="returnAsmtTeacherId" name="teacher_id">
                 <div class="form-group">
                     <label>Remarks / Feedback</label>
                     <textarea name="remarks" rows="4" required placeholder="Describe what needs to be corrected..."></textarea>
