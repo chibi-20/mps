@@ -1290,6 +1290,8 @@ async function loadSubmissions() {
                         data-aid="${row.id}"
                         data-title="${escHtml(row.title)}"
                         data-teacher="${escHtml(row.teacher_name)}"
+                        data-shared="${row.is_shared}"
+                        data-teacher-id="${row.teacher_id ?? ''}"
                         onclick="adminDeleteAssessment(this)">Delete</button>
             </td>`;
     });
@@ -1304,14 +1306,21 @@ async function approveAssessment(id, teacherId) {
 }
 
 async function adminDeleteAssessment(btn) {
-    const id      = +btn.dataset.aid;
-    const title   = btn.dataset.title;
-    const teacher = btn.dataset.teacher;
-    if (!confirm(`Delete "${title}" by ${teacher}?\n\nThis permanently removes all its MPS and Item Analysis data and cannot be undone.`)) return;
-    const r = await apiPost('api/admin_delete_assessment.php', { assessment_id: id });
+    const id        = +btn.dataset.aid;
+    const title     = btn.dataset.title;
+    const teacher   = btn.dataset.teacher;
+    const isShared  = btn.dataset.shared === '1';
+    const teacherId = btn.dataset.teacherId ? +btn.dataset.teacherId : null;
+
+    const msg = isShared
+        ? `Delete ${teacher}'s submission for "${title}"?\n\nThis only removes their sections' MPS and Item Analysis data. The assessment stays available for other teachers.`
+        : `Delete "${title}" by ${teacher}?\n\nThis permanently removes all its MPS and Item Analysis data and cannot be undone.`;
+    if (!confirm(msg)) return;
+
+    const r = await apiPost('api/admin_delete_encoding.php', { assessment_id: id, teacher_id: teacherId });
     if (r.error) { showToast(r.error, 'error'); return; }
     btn.closest('tr')?.remove();
-    showToast('Assessment deleted.');
+    showToast(r.whole_assessment_deleted ? 'Assessment deleted.' : 'Submission deleted.');
     refreshDashboard();
 }
 
