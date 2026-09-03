@@ -35,7 +35,7 @@ if ($assessmentId) {
 $whereSQL = implode(' AND ', $where);
 
 $asmtStmt = $pdo->prepare(
-    "SELECT a.id, a.total_items, a.title, a.date_given,
+    "SELECT a.id, a.total_items, a.title, a.date_given, a.is_shared,
             s.name AS subject_name, s.grade_level
      FROM assessments a
      JOIN subjects s ON s.id = a.subject_id
@@ -276,7 +276,30 @@ foreach ($assessments as $asmt) {
 $overallMean = $grandCases > 0 ? $grandFx / $grandCases : 0;
 $overallMps  = ($grandCases > 0 && $totalItems > 0) ? $overallMean / $totalItems * 100 : 0;
 
-$submittedCount = count($assessments);
+// "Submitted Assessments" = actual number of submissions, not assessment
+// templates. A legacy assessment is 1 teacher = 1 submission, so counting
+// assessment rows works there -- but a shared assessment is one row that
+// many teachers each submit their own sections under (one row per teacher
+// in teacher_assessment_encodings), so e.g. 15 teachers submitting the same
+// Grade 10 MAPEH test previously still showed "1".
+$submittedCount = 0;
+$sharedAsmtIds  = [];
+foreach ($assessments as $a) {
+    if ((int)$a['is_shared'] === 0) {
+        $submittedCount++;
+    } else {
+        $sharedAsmtIds[] = (int)$a['id'];
+    }
+}
+if (!empty($sharedAsmtIds)) {
+    $in2 = implode(',', array_fill(0, count($sharedAsmtIds), '?'));
+    $subCntStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM teacher_assessment_encodings
+         WHERE assessment_id IN ({$in2}) AND status IN ('submitted','approved')"
+    );
+    $subCntStmt->execute($sharedAsmtIds);
+    $submittedCount += (int)$subCntStmt->fetchColumn();
+}
 
 $below50 = 0;
 for ($i = 1; $i <= $maxItem; $i++) {
