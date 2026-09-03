@@ -156,7 +156,7 @@ $csrf = csrf_token();
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MPS System – Teacher Registration</title>
 <link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
+<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
 </head>
 <body class="auth-page">
 <div class="login-split">

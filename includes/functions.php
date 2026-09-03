@@ -7,6 +7,22 @@ require_once __DIR__ . '/db.php';
 // ============================================================
 
 /**
+ * URL for a static asset (script.js, styles.css) with a cache-busting
+ * ?v= query string derived from the file's mtime. Without this, a CDN or
+ * browser holding a long max-age on these files (e.g. Hostinger's CDN
+ * caches script.js for 7 days) keeps serving stale JS/CSS after a deploy
+ * until that cache naturally expires or is manually purged -- appending
+ * the mtime makes every content change look like a brand new URL, so it's
+ * always fetched fresh.
+ */
+function asset_url(string $relativePath): string
+{
+    $file = __DIR__ . '/../' . $relativePath;
+    $v    = is_file($file) ? filemtime($file) : time();
+    return BASE_URL . $relativePath . '?v=' . $v;
+}
+
+/**
  * Build display name: "CANTURIA, Jay Mar V."
  */
 function display_name(array $user): string

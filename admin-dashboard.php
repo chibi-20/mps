@@ -44,7 +44,7 @@ unset($_t);
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Dashboard – MPS System</title>
 <link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
+<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -825,6 +825,6 @@ const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
     </div>
 </div>
 
-<script src="<?= BASE_URL ?>script.js"></script>
+<script src="<?= asset_url('script.js') ?>"></script>
 </body>
 </html>

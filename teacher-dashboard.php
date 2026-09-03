@@ -91,7 +91,7 @@ $csrf = csrf_token();
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Teacher Dashboard – MPS System</title>
 <link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= BASE_URL ?>styles.css">
+<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -322,6 +322,6 @@ let currentAssessmentId  = null;
 let miniChart            = null;
 let selectedSharedAsmtId = null;
 </script>
-<script src="<?= BASE_URL ?>script.js"></script>
+<script src="<?= asset_url('script.js') ?>"></script>
 </body>
 </html>
