@@ -101,7 +101,6 @@ if (!empty($ownRemoveCandidates)) {
 
 $blockedForData = $confirmRemove ? [] : $hasData;
 $actualRemove   = array_values(array_diff($ownRemoveCandidates, $blockedForData));
-$blockedRemove  = array_values(array_unique(array_merge($heldByOthers, $blockedForData)));
 
 $pdo->beginTransaction();
 try {
@@ -150,12 +149,24 @@ try {
     $finalStmt->execute([$subjectId, $assessmentId, $uid, $activeSY]);
     $finalCount = (int)$finalStmt->fetchColumn();
 
-    $blockedInfo = [];
-    if (!empty($blockedRemove)) {
-        $bph   = implode(',', array_fill(0, count($blockedRemove), '?'));
-        $bStmt = $pdo->prepare("SELECT id, name FROM sections WHERE id IN ({$bph}) ORDER BY name");
-        $bStmt->execute($blockedRemove);
-        $blockedInfo = $bStmt->fetchAll();
+    // heldByOthers can NEVER be removed from this screen (regardless of
+    // confirm_remove_with_data) -- keep it a separate, clearly-labeled
+    // category so the frontend never re-offers a "Continue?" that would
+    // silently do nothing a second time.
+    $sharedInfo = [];
+    if (!empty($heldByOthers)) {
+        $shph  = implode(',', array_fill(0, count($heldByOthers), '?'));
+        $shStmt = $pdo->prepare("SELECT id, name FROM sections WHERE id IN ({$shph}) ORDER BY name");
+        $shStmt->execute($heldByOthers);
+        $sharedInfo = $shStmt->fetchAll();
+    }
+
+    $dataInfo = [];
+    if (!empty($blockedForData)) {
+        $dph   = implode(',', array_fill(0, count($blockedForData), '?'));
+        $dStmt = $pdo->prepare("SELECT id, name FROM sections WHERE id IN ({$dph}) ORDER BY name");
+        $dStmt->execute($blockedForData);
+        $dataInfo = $dStmt->fetchAll();
     }
 
     json_response([
@@ -164,7 +175,8 @@ try {
         'sections'       => $finalCount,
         'added'          => count($toAdd),
         'removed'        => count($actualRemove),
-        'blocked_remove' => $blockedInfo,
+        'blocked_shared' => $sharedInfo, // co-assigned to another teacher's active encoding -- never removable here
+        'blocked_data'   => $dataInfo,   // this teacher's own data -- removable once confirmed
     ]);
 } catch (Throwable $e) {
     $pdo->rollBack();

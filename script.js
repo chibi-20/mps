@@ -1905,10 +1905,24 @@ async function startEncoding(confirmRemoveWithData) {
     });
     if (r.error) { showToast(r.error, 'error'); return; }
 
-    if (r.blocked_remove?.length) {
-        const names = r.blocked_remove.map(s => s.name).join(', ');
-        const msg = `${names} already ${r.blocked_remove.length > 1 ? 'have' : 'has'} scores entered for this assessment. `
-            + `Unchecking ${r.blocked_remove.length > 1 ? 'them' : 'it'} will permanently delete that data. Continue?`;
+    // Shared with another teacher's already-active encoding -- can NEVER be
+    // removed from here, no matter how many times you confirm. Re-check those
+    // boxes so the UI matches reality (and so retrying doesn't just ask again).
+    if (r.blocked_shared?.length) {
+        const names = r.blocked_shared.map(s => s.name).join(', ');
+        r.blocked_shared.forEach(s => {
+            const cb = document.querySelector(`#selectSectionChecklist input[value="${s.id}"]`);
+            if (cb) cb.checked = true;
+        });
+        alert(`${names} ${r.blocked_shared.length > 1 ? 'are' : 'is'} also being encoded by another teacher who already `
+            + `submitted this assessment, so ${r.blocked_shared.length > 1 ? 'they' : 'it'} can't be removed here. `
+            + `Left checked. Ask your admin if this needs to change.`);
+    }
+
+    if (r.blocked_data?.length) {
+        const names = r.blocked_data.map(s => s.name).join(', ');
+        const msg = `${names} already ${r.blocked_data.length > 1 ? 'have' : 'has'} scores entered for this assessment. `
+            + `Unchecking ${r.blocked_data.length > 1 ? 'them' : 'it'} will permanently delete that data. Continue?`;
         if (confirm(msg)) { startEncoding(true); return; }
         showToast('Kept sections with existing data unchanged.', 'error');
         return;
