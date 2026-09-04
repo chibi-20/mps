@@ -1,15 +1,18 @@
 <?php
 /**
  * Returns sections available for a given subject_id, scoped to the teacher's
- * grade level. Also returns pre-checked section IDs (admin-set defaults from
- * teacher_assignments, falling back to the most recent assessment's sections).
+ * grade level. Also returns pre-checked section IDs: if an assessment_id is
+ * given and the teacher has already started encoding it, "checked" reflects
+ * that specific assessment's current sections; otherwise it falls back to
+ * admin-set defaults from teacher_assignments (or the most recent assessment).
  */
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 
-$sess       = require_login('teacher');
-$uid        = (int)$sess['user_id'];
-$subject_id = validate_int($_GET['subject_id'] ?? null, 1);
+$sess         = require_login('teacher');
+$uid          = (int)$sess['user_id'];
+$subject_id   = validate_int($_GET['subject_id'] ?? null, 1);
+$assessment_id = validate_int($_GET['assessment_id'] ?? null, 1);
 if (!$subject_id) json_response(['error' => 'Missing subject_id.'], 400);
 
 $pdo = get_pdo();
@@ -40,9 +43,33 @@ $secStmt = $pdo->prepare(
 $secStmt->execute([$grade, $syId]);
 $sections = $secStmt->fetchAll();
 
-// Pre-checked: admin-assigned defaults (teacher_assignments)
 $checked = [];
-if ($syId) {
+$started = false; // true once we have an assessment-specific answer, even if it's zero sections
+
+// If this is for a specific assessment the teacher has already started
+// encoding, reflect THAT assessment's actual current sections -- not just
+// the standing subject defaults -- so re-opening the picker shows reality.
+if ($assessment_id && $syId) {
+    $taeChk = $pdo->prepare(
+        "SELECT 1 FROM teacher_assessment_encodings WHERE assessment_id = ? AND teacher_id = ?"
+    );
+    $taeChk->execute([$assessment_id, $uid]);
+    if ($taeChk->fetch()) {
+        $started = true;
+        $curStmt = $pdo->prepare(
+            "SELECT asec.section_id
+             FROM assessment_sections asec
+             JOIN teacher_assignments ta
+               ON ta.section_id = asec.section_id AND ta.subject_id = ? AND ta.school_year_id = ?
+             WHERE asec.assessment_id = ? AND ta.teacher_id = ?"
+        );
+        $curStmt->execute([$subject_id, $syId, $assessment_id, $uid]);
+        $checked = array_column($curStmt->fetchAll(), 'section_id');
+    }
+}
+
+// Pre-checked: admin-assigned defaults (teacher_assignments)
+if (!$started && empty($checked) && $syId) {
     $taStmt = $pdo->prepare(
         "SELECT section_id FROM teacher_assignments
          WHERE teacher_id = ? AND subject_id = ? AND school_year_id = ?"
@@ -52,7 +79,7 @@ if ($syId) {
 }
 
 // Fall back: most recent assessment's section set for this teacher+subject
-if (empty($checked)) {
+if (!$started && empty($checked)) {
     $lastStmt = $pdo->prepare(
         "SELECT id FROM assessments
          WHERE teacher_id = ? AND subject_id = ?

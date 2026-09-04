@@ -47,14 +47,16 @@ if ($role === 'teacher') {
 if ($role === 'teacher' && $isShared) {
     $activeSY = $pdo->query("SELECT id FROM school_years WHERE is_active=1 LIMIT 1")->fetchColumn();
     $secStmt  = $pdo->prepare(
-        "SELECT sec.id, sec.name, sec.grade_level
+        "SELECT DISTINCT sec.id, sec.name, sec.grade_level
          FROM assessment_sections as_
          JOIN sections sec ON sec.id = as_.section_id
-         JOIN teacher_assignments ta ON ta.section_id = sec.id
+         JOIN teacher_assignments ta
+           ON ta.section_id = sec.id
+          AND ta.subject_id = ?
          WHERE as_.assessment_id = ? AND ta.teacher_id = ? AND ta.school_year_id = ?
          ORDER BY sec.name"
     );
-    $secStmt->execute([$id, $uid, $activeSY ?: 0]);
+    $secStmt->execute([$assessment['subject_id'], $id, $uid, $activeSY ?: 0]);
 } else {
     $secStmt = $pdo->prepare(
         "SELECT sec.id, sec.name, sec.grade_level

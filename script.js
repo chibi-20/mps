@@ -1768,7 +1768,7 @@ async function selectSharedAsmt(id) {
     checklist.innerHTML = '<p class="text-muted">Loading sections…</p>';
     document.getElementById('selectAsmtSections').style.display = 'block';
 
-    const data = await apiGet(`api/get_sections.php?subject_id=${asmt.subject_id}`);
+    const data = await apiGet(`api/get_sections.php?subject_id=${asmt.subject_id}&assessment_id=${id}`);
     if (data.error || !data.sections?.length) {
         checklist.innerHTML = '<p class="alert alert-warning">No sections found for your assignment. Contact admin.</p>';
         return;
@@ -1786,7 +1786,7 @@ function clearAsmtSelection() {
     document.getElementById('selectSectionChecklist').innerHTML = '';
 }
 
-async function startEncoding() {
+async function startEncoding(confirmRemoveWithData) {
     if (!selectedSharedAsmtId) return;
     const checked = [...document.querySelectorAll('#selectSectionChecklist input:checked')].map(cb => +cb.value);
     if (!checked.length) { showToast('Select at least one section.', 'error'); return; }
@@ -1794,10 +1794,20 @@ async function startEncoding() {
     const r = await apiPost('api/start_encoding.php', {
         assessment_id: selectedSharedAsmtId,
         section_ids:   checked,
+        confirm_remove_with_data: !!confirmRemoveWithData,
     });
     if (r.error) { showToast(r.error, 'error'); return; }
 
-    showToast(`Started encoding — ${r.sections} section(s) ready.`);
+    if (r.blocked_remove?.length) {
+        const names = r.blocked_remove.map(s => s.name).join(', ');
+        const msg = `${names} already ${r.blocked_remove.length > 1 ? 'have' : 'has'} scores entered for this assessment. `
+            + `Unchecking ${r.blocked_remove.length > 1 ? 'them' : 'it'} will permanently delete that data. Continue?`;
+        if (confirm(msg)) { startEncoding(true); return; }
+        showToast('Kept sections with existing data unchanged.', 'error');
+        return;
+    }
+
+    showToast(`Sections updated — ${r.sections} section(s) ready.`);
     setTimeout(() => {
         loadAssessment(selectedSharedAsmtId);
         document.getElementById('newAssessmentPanel').style.display = 'none';

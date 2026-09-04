@@ -22,7 +22,7 @@ if (!in_array($action, ['draft', 'submit'], true)) json_response(['error' => 'In
 
 $pdo = get_pdo();
 
-$stmt = $pdo->prepare("SELECT teacher_id, status, total_items, is_shared FROM assessments WHERE id = ?");
+$stmt = $pdo->prepare("SELECT teacher_id, subject_id, status, total_items, is_shared FROM assessments WHERE id = ?");
 $stmt->execute([$assessment_id]);
 $asmt = $stmt->fetch();
 if (!$asmt) json_response(['error' => 'Assessment not found.'], 404);
@@ -53,10 +53,12 @@ if ($isShared) {
     $vStmt    = $pdo->prepare(
         "SELECT as_.section_id
          FROM assessment_sections as_
-         JOIN teacher_assignments ta ON ta.section_id = as_.section_id
+         JOIN teacher_assignments ta
+           ON ta.section_id = as_.section_id
+          AND ta.subject_id = ?
          WHERE as_.assessment_id = ? AND ta.teacher_id = ? AND ta.school_year_id = ?"
     );
-    $vStmt->execute([$assessment_id, $uid, $activeSY ?: 0]);
+    $vStmt->execute([$asmt['subject_id'], $assessment_id, $uid, $activeSY ?: 0]);
 } else {
     $vStmt = $pdo->prepare("SELECT section_id FROM assessment_sections WHERE assessment_id = ?");
     $vStmt->execute([$assessment_id]);
