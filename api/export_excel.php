@@ -1,14 +1,10 @@
 <?php
+// Teacher/admin single-assessment MPS + Item Analysis export — ZipArchive-based
+// XLSX via MiniXlsx, no external dependencies (no Composer/vendor needed).
+
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
-require_once __DIR__ . '/../vendor/autoload.php';
-
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Border;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Style\Font;
+require_once __DIR__ . '/../includes/MiniXlsx.php';
 
 $sess          = require_login();
 $uid           = (int)$sess['user_id'];
@@ -61,348 +57,266 @@ $secIds   = array_column($sections, 'id');
 // Score frequencies
 $sfStmt = $pdo->prepare("SELECT section_id, score, frequency FROM score_frequencies WHERE assessment_id=? AND frequency>0");
 $sfStmt->execute([$assessment_id]);
-$sfRaw = $sfStmt->fetchAll();
 $sf = [];
-foreach ($sfRaw as $r) { $sf[(int)$r['section_id']][(int)$r['score']] = (int)$r['frequency']; }
+foreach ($sfStmt->fetchAll() as $r) { $sf[(int)$r['section_id']][(int)$r['score']] = (int)$r['frequency']; }
 
 // Item correct counts
 $iccStmt = $pdo->prepare("SELECT section_id, item_no, correct_count FROM item_correct_counts WHERE assessment_id=? ORDER BY item_no");
 $iccStmt->execute([$assessment_id]);
-$iccRaw = $iccStmt->fetchAll();
 $icc = [];
-foreach ($iccRaw as $r) { $icc[(int)$r['section_id']][(int)$r['item_no']] = (int)$r['correct_count']; }
+foreach ($iccStmt->fetchAll() as $r) { $icc[(int)$r['section_id']][(int)$r['item_no']] = (int)$r['correct_count']; }
 
 // Per-section CASES and Σf(x)
 $sectionCases = [];
 $sectionFx    = [];
 foreach ($secIds as $sid) {
     $c = 0; $fx = 0;
-    if (isset($sf[$sid])) {
-        foreach ($sf[$sid] as $score => $freq) {
-            $c  += $freq;
-            $fx += $freq * $score;
-        }
+    foreach ($sf[$sid] ?? [] as $score => $freq) {
+        $c  += $freq;
+        $fx += $freq * $score;
     }
     $sectionCases[$sid] = $c;
     $sectionFx[$sid]    = $fx;
 }
 
-// ---- Build Spreadsheet ----
-$ss  = new Spreadsheet();
+$numSecs     = count($sections);
+$dataLastCol = 1 + $numSecs * 2 + 2; // Score/Item + (f,fx or f,%)×secs + Total pair
 
-// ============================================================
-// HELPER: DepEd header block
-// ============================================================
-function writeDepEdHeader($sheet, int $lastCol): int
-{
-    $colLetter = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($lastCol);
-    $headers = [
-        REPUBLIC, DEPED_HEADER, REGION, DIVISION, SCHOOL_NAME, SCHOOL_ADDRESS,
-    ];
-    $row = 1;
-    foreach ($headers as $text) {
-        $sheet->setCellValue("A{$row}", $text);
-        $sheet->mergeCells("A{$row}:{$colLetter}{$row}");
-        $sheet->getStyle("A{$row}")->getAlignment()
-              ->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("A{$row}")->getFont()->setBold($row <= 2 || $row === 5);
-        $sheet->getStyle("A{$row}")->getFont()->setSize($row === 5 ? 12 : 10);
-        $row++;
-    }
-    return $row; // returns next empty row
-}
+$xl = new MiniXlsx();
 
 // ============================================================
 // SHEET 1: MPS (Frequency of Scores)
 // ============================================================
-$sheet1 = $ss->getActiveSheet();
-$sheet1->setTitle('MPS');
+$si1 = $xl->addSheet('MPS');
+$xl->colWidth($si1, 1, 10);
+for ($c = 2; $c <= $dataLastCol; $c++) $xl->colWidth($si1, $c, 10);
 
-$numSecs   = count($sections);
-$dataLastCol = 1 + $numSecs * 2 + 2;   // Score + (f,fx)*secs + Total f + Total fx
+$row = xlDepEdHeader($xl, $si1, $dataLastCol);
+$row++;
 
-$nextRow = writeDepEdHeader($sheet1, $dataLastCol);
-$nextRow++; // blank
+$xl->cell($si1, $row, 1, 'Subject:', MiniXlsx::S_BOLD);
+$xl->cell($si1, $row, 2, strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
+$row++;
+$xl->cell($si1, $row, 1, 'Test Title:', MiniXlsx::S_BOLD);
+$xl->cell($si1, $row, 2, strtoupper($asmt['title']));
+$row++;
+$xl->cell($si1, $row, 1, 'Teacher:', MiniXlsx::S_BOLD);
+$xl->cell($si1, $row, 2, $teacherName);
+$row++;
+$xl->cell($si1, $row, 1, 'Term:', MiniXlsx::S_BOLD);
+$xl->cell($si1, $row, 2, 'Term ' . $asmt['term_no'] . ' — ' . $asmt['term_name']);
+$row += 2;
 
-// Metadata rows
-$sheet1->setCellValue("A{$nextRow}", 'Subject:');
-$sheet1->setCellValue("B{$nextRow}", strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
-$nextRow++;
-$sheet1->setCellValue("A{$nextRow}", 'Test Title:');
-$sheet1->setCellValue("B{$nextRow}", strtoupper($asmt['title']));
-$nextRow++;
-$sheet1->setCellValue("A{$nextRow}", 'Teacher:');
-$sheet1->setCellValue("B{$nextRow}", $teacherName);
-$nextRow++;
-$sheet1->setCellValue("A{$nextRow}", 'Term:');
-$sheet1->setCellValue("B{$nextRow}", 'Term ' . $asmt['term_no'] . ' — ' . $asmt['term_name']);
-$nextRow++;
-$nextRow++;
-
-// Table header row 1
-$headerRow = $nextRow;
+// Two-row table header
+$hr1 = $row;
 $col = 1;
-$sheet1->setCellValueByColumnAndRow($col++, $headerRow, 'Score');
+$xl->cell($si1, $hr1, $col++, 'Score', MiniXlsx::S_HDR);
 foreach ($sections as $sec) {
-    $sheet1->setCellValueByColumnAndRow($col, $headerRow, $sec['name']);
-    $sheet1->mergeCellsByColumnAndRow($col, $headerRow, $col+1, $headerRow);
+    $xl->cell($si1, $hr1, $col, $sec['name'], MiniXlsx::S_HDR);
+    $xl->merge($si1, $hr1, $col, $hr1, $col + 1);
     $col += 2;
 }
-$sheet1->setCellValueByColumnAndRow($col, $headerRow, 'TOTAL');
-$sheet1->mergeCellsByColumnAndRow($col, $headerRow, $col+1, $headerRow);
+$xl->cell($si1, $hr1, $col, 'TOTAL', MiniXlsx::S_HDR);
+$xl->merge($si1, $hr1, $col, $hr1, $col + 1);
 
-// Table header row 2
-$nextRow++;
-$col = 1;
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, '');  // Score col spans 2 rows
-foreach ($sections as $sec) {
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'f');
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'f(x)');
+$hr2 = $hr1 + 1;
+$xl->merge($si1, $hr1, 1, $hr2, 1); // Score spans both header rows
+$col = 2;
+foreach ($sections as $_sec) {
+    $xl->cell($si1, $hr2, $col++, 'f',    MiniXlsx::S_HDR);
+    $xl->cell($si1, $hr2, $col++, 'f(x)', MiniXlsx::S_HDR);
 }
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'f');
-$sheet1->setCellValueByColumnAndRow($col,   $nextRow, 'f(x)');
-
-// Merge Score header across 2 rows
-$sheet1->mergeCellsByColumnAndRow(1, $headerRow, 1, $nextRow);
-
-// Style header rows
-$headerRange = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(1)
-    . $headerRow . ':'
-    . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($dataLastCol)
-    . $nextRow;
-$sheet1->getStyle($headerRange)->getFont()->setBold(true);
-$sheet1->getStyle($headerRange)->getFill()
-       ->setFillType(Fill::FILL_SOLID)
-       ->getStartColor()->setARGB('FFD6E4F0');
-$sheet1->getStyle($headerRange)->getAlignment()
-       ->setHorizontal(Alignment::HORIZONTAL_CENTER)
-       ->setVertical(Alignment::VERTICAL_CENTER);
-
-$nextRow++;
-$dataStartRow = $nextRow;
+$xl->cell($si1, $hr2, $col++, 'f',    MiniXlsx::S_HDR);
+$xl->cell($si1, $hr2, $col,   'f(x)', MiniXlsx::S_HDR);
+$row += 2;
 
 // Data rows (scores totalItems down to 0)
-$totals   = array_fill(0, count($sections), ['f'=>0,'fx'=>0]);
-$grandF   = 0; $grandFx = 0;
+$totals = array_fill(0, count($sections), ['f' => 0, 'fx' => 0]);
+$grandF = 0; $grandFx = 0;
 
 for ($score = $totalItems; $score >= 0; $score--) {
     $col = 1;
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $score);
+    $xl->cell($si1, $row, $col++, $score);
     $rowTotalF = 0; $rowTotalFx = 0;
     foreach ($sections as $i => $sec) {
         $f  = $sf[$sec['id']][$score] ?? 0;
         $fx = $f * $score;
-        $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $f  ?: '');
-        $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $fx ?: '');
+        $xl->cell($si1, $row, $col++, $f  ?: null);
+        $xl->cell($si1, $row, $col++, $fx ?: null);
         $totals[$i]['f']  += $f;
         $totals[$i]['fx'] += $fx;
         $rowTotalF  += $f;
         $rowTotalFx += $fx;
     }
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $rowTotalF  ?: '');
-    $sheet1->setCellValueByColumnAndRow($col,   $nextRow, $rowTotalFx ?: '');
+    $xl->cell($si1, $row, $col++, $rowTotalF  ?: null);
+    $xl->cell($si1, $row, $col,   $rowTotalFx ?: null);
     $grandF  += $rowTotalF;
     $grandFx += $rowTotalFx;
-    $nextRow++;
+    $row++;
 }
 
-// Summary rows
-$summaries = [];
-
-// CASES — write Σf (cases) AND Σf(x) side by side
+// CASES
 $col = 1;
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'CASES');
+$xl->cell($si1, $row, $col++, 'CASES', MiniXlsx::S_BOLD);
 foreach ($sections as $i => $sec) {
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $totals[$i]['f']);
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $totals[$i]['fx']);
+    $xl->cell($si1, $row, $col++, $totals[$i]['f']);
+    $xl->cell($si1, $row, $col++, $totals[$i]['fx']);
 }
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, $grandF);
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, $grandFx);
-$nextRow++;
+$xl->cell($si1, $row, $col++, $grandF);
+$xl->cell($si1, $row, $col,   $grandFx);
+$row++;
 
 // MEAN
 $col = 1;
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'MEAN');
+$xl->cell($si1, $row, $col++, 'MEAN', MiniXlsx::S_BOLD);
 foreach ($sections as $i => $sec) {
     $cases = $totals[$i]['f'];
     $mean  = $cases > 0 ? round($totals[$i]['fx'] / $cases, 2) : '—';
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $mean);
+    $xl->cell($si1, $row, $col++, $mean);
     $col++;
 }
 $grandMean = $grandF > 0 ? round($grandFx / $grandF, 2) : '—';
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, $grandMean);
-$col++;
-$nextRow++;
+$xl->cell($si1, $row, $col, $grandMean);
+$row++;
 
 // MPS
 $col = 1;
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'MPS (%)');
+$xl->cell($si1, $row, $col++, 'MPS (%)', MiniXlsx::S_BOLD);
 foreach ($sections as $i => $sec) {
     $cases = $totals[$i]['f'];
     $mean  = $cases > 0 ? $totals[$i]['fx'] / $cases : 0;
     $mps   = ($cases > 0 && $totalItems > 0) ? round($mean / $totalItems * 100, 2) : '—';
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $mps);
+    $sty   = is_numeric($mps) ? mpsStyle((float)$mps) : 0;
+    $xl->cell($si1, $row, $col++, $mps, $sty);
     $col++;
 }
 $grandMps = ($grandF > 0 && $totalItems > 0) ? round(($grandFx / $grandF) / $totalItems * 100, 2) : '—';
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, $grandMps);
-$nextRow++;
+$xl->cell($si1, $row, $col, $grandMps, is_numeric($grandMps) ? mpsStyle((float)$grandMps) : 0);
+$row++;
 
 // Mastery Bands
 foreach (MASTERY_BANDS as $bk => $band) {
     $col = 1;
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $bk . ' — ' . $band['label']);
+    $xl->cell($si1, $row, $col++, $bk . ' — ' . $band['label'], MiniXlsx::S_BOLD);
     foreach ($sections as $i => $sec) {
         $cases = $totals[$i]['f'];
         $cnt = 0;
-        if (isset($sf[$sec['id']])) {
-            foreach ($sf[$sec['id']] as $score => $freq) {
-                $pct2 = $totalItems > 0 ? $score / $totalItems * 100 : 0;
-                if ($pct2 >= $band['min'] && $pct2 <= $band['max']) $cnt += $freq;
-            }
+        foreach ($sf[$sec['id']] ?? [] as $score => $freq) {
+            $pct2 = $totalItems > 0 ? $score / $totalItems * 100 : 0;
+            if ($pct2 >= $band['min'] && $pct2 <= $band['max']) $cnt += $freq;
         }
         $prop = $cases > 0 ? round($cnt / $cases * 100, 1) . '%' : '—';
-        $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $cnt);
-        $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $prop);
+        $xl->cell($si1, $row, $col++, $cnt ?: null);
+        $xl->cell($si1, $row, $col++, $prop);
     }
-    $nextRow++;
+    $row++;
 }
 
 // NPWRM
 $col = 1;
-$sheet1->setCellValueByColumnAndRow($col++, $nextRow, 'NPWRM (≥' . MASTERY_THRESHOLD . '%)');
+$xl->cell($si1, $row, $col++, 'NPWRM (≥' . MASTERY_THRESHOLD . '%)', MiniXlsx::S_BOLD);
 foreach ($sections as $i => $sec) {
     $npwrm = 0;
-    if (isset($sf[$sec['id']])) {
-        foreach ($sf[$sec['id']] as $score => $freq) {
-            $pct3 = $totalItems > 0 ? $score / $totalItems * 100 : 0;
-            if ($pct3 >= MASTERY_THRESHOLD) $npwrm += $freq;
-        }
+    foreach ($sf[$sec['id']] ?? [] as $score => $freq) {
+        $pct3 = $totalItems > 0 ? $score / $totalItems * 100 : 0;
+        if ($pct3 >= MASTERY_THRESHOLD) $npwrm += $freq;
     }
-    $sheet1->setCellValueByColumnAndRow($col++, $nextRow, $npwrm);
+    $xl->cell($si1, $row, $col++, $npwrm ?: null);
     $col++;
-}
-
-// Auto-size columns
-foreach (range(1, $dataLastCol) as $ci) {
-    $sheet1->getColumnDimensionByColumn($ci)->setAutoSize(true);
 }
 
 // ============================================================
 // SHEET 2: ITEM ANALYSIS
 // ============================================================
-$sheet2 = $ss->createSheet();
-$sheet2->setTitle('ITEM ANALYSIS');
+$si2 = $xl->addSheet('ITEM ANALYSIS');
+$xl->colWidth($si2, 1, 10);
+for ($c = 2; $c <= $dataLastCol; $c++) $xl->colWidth($si2, $c, 10);
 
-$itemLastCol = 1 + $numSecs * 2 + 2;
-$nextRow2    = writeDepEdHeader($sheet2, $itemLastCol);
-$nextRow2++;
-$sheet2->setCellValue("A{$nextRow2}", 'Subject:');
-$sheet2->setCellValue("B{$nextRow2}", strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
-$nextRow2++;
-$sheet2->setCellValue("A{$nextRow2}", 'Test Title:');
-$sheet2->setCellValue("B{$nextRow2}", strtoupper($asmt['title']));
-$nextRow2++;
-$sheet2->setCellValue("A{$nextRow2}", 'Teacher:');
-$sheet2->setCellValue("B{$nextRow2}", $teacherName);
-$nextRow2+=2;
+$row2 = xlDepEdHeader($xl, $si2, $dataLastCol);
+$row2++;
+$xl->cell($si2, $row2, 1, 'Subject:', MiniXlsx::S_BOLD);
+$xl->cell($si2, $row2, 2, strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
+$row2++;
+$xl->cell($si2, $row2, 1, 'Test Title:', MiniXlsx::S_BOLD);
+$xl->cell($si2, $row2, 2, strtoupper($asmt['title']));
+$row2++;
+$xl->cell($si2, $row2, 1, 'Teacher:', MiniXlsx::S_BOLD);
+$xl->cell($si2, $row2, 2, $teacherName);
+$row2 += 2;
 
 // Header
-$hr1 = $nextRow2;
+$hr1b = $row2;
 $col = 1;
-$sheet2->setCellValueByColumnAndRow($col++, $hr1, 'Item No.');
+$xl->cell($si2, $hr1b, $col++, 'Item No.', MiniXlsx::S_HDR);
 foreach ($sections as $sec) {
-    $sheet2->setCellValueByColumnAndRow($col, $hr1, $sec['name']);
-    $sheet2->mergeCellsByColumnAndRow($col, $hr1, $col+1, $hr1);
+    $xl->cell($si2, $hr1b, $col, $sec['name'], MiniXlsx::S_HDR);
+    $xl->merge($si2, $hr1b, $col, $hr1b, $col + 1);
     $col += 2;
 }
-$sheet2->setCellValueByColumnAndRow($col, $hr1, 'TOTAL');
-$sheet2->mergeCellsByColumnAndRow($col, $hr1, $col+1, $hr1);
+$xl->cell($si2, $hr1b, $col, 'TOTAL', MiniXlsx::S_HDR);
+$xl->merge($si2, $hr1b, $col, $hr1b, $col + 1);
 
-$nextRow2++;
-$col = 1;
-$sheet2->setCellValueByColumnAndRow($col++, $nextRow2, '');
-$sheet2->mergeCellsByColumnAndRow(1, $hr1, 1, $nextRow2);
-foreach ($sections as $sec) {
-    $sheet2->setCellValueByColumnAndRow($col++, $nextRow2, 'f');
-    $sheet2->setCellValueByColumnAndRow($col++, $nextRow2, '%');
+$hr2b = $hr1b + 1;
+$xl->merge($si2, $hr1b, 1, $hr2b, 1);
+$col = 2;
+foreach ($sections as $_sec) {
+    $xl->cell($si2, $hr2b, $col++, 'f', MiniXlsx::S_HDR);
+    $xl->cell($si2, $hr2b, $col++, '%', MiniXlsx::S_HDR);
 }
-$sheet2->setCellValueByColumnAndRow($col++, $nextRow2, 'f');
-$sheet2->setCellValueByColumnAndRow($col,   $nextRow2, '%');
-$nextRow2++;
+$xl->cell($si2, $hr2b, $col++, 'f', MiniXlsx::S_HDR);
+$xl->cell($si2, $hr2b, $col,   '%', MiniXlsx::S_HDR);
+$row2 += 2;
 
-// CASES row — denominator for % formulas; row-absolute in Excel formulas below
-$casesRow = $nextRow2;
+// CASES row — denominator for the % columns
+$casesRow = $row2;
 $col = 1;
-$sheet2->setCellValueByColumnAndRow($col++, $casesRow, 'CASES');
+$xl->cell($si2, $casesRow, $col++, 'CASES', MiniXlsx::S_BOLD);
 $grandCases = 0;
 foreach ($sections as $sec) {
     $cases = $sectionCases[$sec['id']] ?? 0;
-    $sheet2->setCellValueByColumnAndRow($col++, $casesRow, $cases ?: '');
-    $col++;  // % column blank for CASES row
+    $xl->cell($si2, $casesRow, $col++, $cases ?: null);
+    $col++; // % column blank for CASES row
     $grandCases += $cases;
 }
-$sheet2->setCellValueByColumnAndRow($col, $casesRow, $grandCases ?: '');
-$nextRow2++;
+$xl->cell($si2, $casesRow, $col, $grandCases ?: null);
+$row2++;
 
-// Item rows — % cells use live Excel formula =(fCell)/(fCell)$casesRow*100
+// Item rows
 for ($item = 1; $item <= $totalItems; $item++) {
     $col = 1;
-    $sheet2->setCellValueByColumnAndRow($col++, $nextRow2, $item);
+    $xl->cell($si2, $row2, $col++, $item);
     $totF = 0; $totCases = 0;
-    foreach ($sections as $idx => $sec) {
-        $f       = $icc[$sec['id']][$item] ?? 0;
-        $cases   = $sectionCases[$sec['id']] ?? 0;
-        $fColIdx = 2 + $idx * 2;
-        $fColLtr = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($fColIdx);
-        $sheet2->setCellValueByColumnAndRow($col++, $nextRow2, $f ?: '');
-        if ($cases > 0) {
-            $sheet2->setCellValueByColumnAndRow($col, $nextRow2, "={$fColLtr}{$nextRow2}/{$fColLtr}\${$casesRow}*100");
-        } else {
-            $sheet2->setCellValueByColumnAndRow($col, $nextRow2, '—');
-        }
-        $col++;
-        $totF    += $f;
+    foreach ($sections as $sec) {
+        $f     = $icc[$sec['id']][$item] ?? 0;
+        $cases = $sectionCases[$sec['id']] ?? 0;
+        $pct   = $cases > 0 ? round($f / $cases * 100, 2) : null;
+        $sty   = ($pct === null) ? 0 : mpsStyle($pct);
+        $xl->cell($si2, $row2, $col++, $f ?: null);
+        $xl->cell($si2, $row2, $col++, $pct ?? '—', $sty);
+        $totF     += $f;
         $totCases += $cases;
     }
-    $totFColIdx = 2 + count($sections) * 2;
-    $totFColLtr = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($totFColIdx);
-    $sheet2->setCellValueByColumnAndRow($col++, $nextRow2, $totF ?: '');
-    if ($totCases > 0) {
-        $sheet2->setCellValueByColumnAndRow($col, $nextRow2, "={$totFColLtr}{$nextRow2}/{$totFColLtr}\${$casesRow}*100");
-    } else {
-        $sheet2->setCellValueByColumnAndRow($col, $nextRow2, '—');
-    }
-    $nextRow2++;
+    $totPct = $totCases > 0 ? round($totF / $totCases * 100, 2) : null;
+    $tSty   = ($totPct === null) ? 0 : mpsStyle($totPct);
+    $xl->cell($si2, $row2, $col++, $totF ?: null);
+    $xl->cell($si2, $row2, $col,   $totPct ?? '—', $tSty);
+    $row2++;
 }
 
 // TOTAL row — sum of item correct counts per section, cross-checked against MPS Σf(x)
 $col = 1;
-$sheet2->setCellValueByColumnAndRow($col++, $nextRow2, 'TOTAL');
+$xl->cell($si2, $row2, $col++, 'TOTAL', MiniXlsx::S_BOLD);
 $grandItemTotal = 0;
-foreach ($sections as $idx => $sec) {
+foreach ($sections as $sec) {
     $itemTotal = 0;
-    if (isset($icc[$sec['id']])) {
-        foreach ($icc[$sec['id']] as $cnt) $itemTotal += $cnt;
-    }
+    foreach ($icc[$sec['id']] ?? [] as $cnt) $itemTotal += $cnt;
     $grandItemTotal += $itemTotal;
-    $fx = $sectionFx[$sec['id']] ?? 0;
-    $sheet2->setCellValueByColumnAndRow($col, $nextRow2, $itemTotal ?: '');
-    if ($fx > 0 && $itemTotal !== $fx) {
-        $fColLtr = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
-        $sheet2->getStyle("{$fColLtr}{$nextRow2}")->getFill()
-               ->setFillType(Fill::FILL_SOLID)
-               ->getStartColor()->setARGB('FFFF9999');
-    }
-    $col++;
-    $col++;  // skip % column in TOTAL row
+    $fx      = $sectionFx[$sec['id']] ?? 0;
+    $mismatch = ($fx > 0 && $itemTotal !== $fx);
+    $xl->cell($si2, $row2, $col, $itemTotal ?: null, $mismatch ? MiniXlsx::S_RED : 0);
+    $col += 2; // skip % column in TOTAL row
 }
-$sheet2->setCellValueByColumnAndRow($col, $nextRow2, $grandItemTotal ?: '');
-$nextRow2++;
-
-foreach (range(1, $itemLastCol) as $ci) {
-    $sheet2->getColumnDimensionByColumn($ci)->setAutoSize(true);
-}
+$xl->cell($si2, $row2, $col, $grandItemTotal ?: null);
 
 // ============================================================
 // SHEET 3: COMPETENCY ANALYSIS
@@ -418,37 +332,36 @@ $compMapStmt->execute([$assessment_id]);
 $compMapRows = $compMapStmt->fetchAll();
 
 if (!empty($compMapRows)) {
-    $sheet3 = $ss->createSheet();
-    $sheet3->setTitle('COMPETENCY ANALYSIS');
+    $compLastCol = 3 + count($sections) + 1; // Code+Desc+Items + sections + Overall
+    $si3 = $xl->addSheet('COMPETENCY ANALYSIS');
+    $xl->colWidth($si3, 1, 12);
+    $xl->colWidth($si3, 2, 45);
+    $xl->colWidth($si3, 3, 14);
+    for ($c = 4; $c <= $compLastCol; $c++) $xl->colWidth($si3, $c, 12);
 
-    $compLastCol = 3 + count($sections) + 1;  // Code+Desc+Items + sections + Total
-    $cr = writeDepEdHeader($sheet3, $compLastCol);
-    $cr++;
-    $sheet3->setCellValue("A{$cr}", 'Subject:');
-    $sheet3->setCellValue("B{$cr}", strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
-    $cr++;
-    $sheet3->setCellValue("A{$cr}", 'Test Title:');
-    $sheet3->setCellValue("B{$cr}", strtoupper($asmt['title']));
-    $cr += 2;
+    $row3 = xlDepEdHeader($xl, $si3, $compLastCol);
+    $row3++;
+    $xl->cell($si3, $row3, 1, 'Subject:', MiniXlsx::S_BOLD);
+    $xl->cell($si3, $row3, 2, strtoupper($asmt['subject_name']) . ' (Grade ' . $asmt['grade_level'] . ')');
+    $row3++;
+    $xl->cell($si3, $row3, 1, 'Test Title:', MiniXlsx::S_BOLD);
+    $xl->cell($si3, $row3, 2, strtoupper($asmt['title']));
+    $row3 += 2;
 
     // Header
-    $hrC = $cr;
+    $hrC = $row3;
     $col = 1;
-    $sheet3->setCellValueByColumnAndRow($col++, $hrC, 'Code');
-    $sheet3->setCellValueByColumnAndRow($col++, $hrC, 'Learning Competency');
-    $sheet3->setCellValueByColumnAndRow($col++, $hrC, 'Items');
+    $xl->cell($si3, $hrC, $col++, 'Code', MiniXlsx::S_HDR);
+    $xl->cell($si3, $hrC, $col++, 'Learning Competency', MiniXlsx::S_HDR);
+    $xl->cell($si3, $hrC, $col++, 'Items', MiniXlsx::S_HDR);
     foreach ($sections as $sec) {
-        $sheet3->setCellValueByColumnAndRow($col++, $hrC, $sec['name'] . ' %');
+        $xl->cell($si3, $hrC, $col++, $sec['name'] . ' %', MiniXlsx::S_HDR);
     }
-    $sheet3->setCellValueByColumnAndRow($col, $hrC, 'Overall %');
-
-    $hdrRange = 'A' . $hrC . ':' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($compLastCol) . $hrC;
-    $sheet3->getStyle($hdrRange)->getFont()->setBold(true);
-    $sheet3->getStyle($hdrRange)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FFD6E4F0');
-    $cr++;
+    $xl->cell($si3, $hrC, $col, 'Overall %', MiniXlsx::S_HDR);
+    $row3++;
 
     // Group items by competency
-    $byComp = [];  // competency_id → {code, description, items[]}
+    $byComp = []; // competency_id → {code, description, items[]}
     foreach ($compMapRows as $r) {
         $cid = (int)$r['competency_id'];
         if (!isset($byComp[$cid])) {
@@ -457,20 +370,19 @@ if (!empty($compMapRows)) {
         $byComp[$cid]['items'][] = (int)$r['item_no'];
     }
 
-    // Write one row per competency
     foreach ($byComp as $cid => $cdata) {
         $col = 1;
-        sort($cdata['items']);
-        $itemsLabel = implode(',', $cdata['items']);
+        $items = $cdata['items'];
+        sort($items);
+        $itemsLabel = implode(',', $items);
 
-        // % per section
-        $secPcts   = [];
-        $totCorr   = 0;
-        $totCases  = 0;
+        $secPcts  = [];
+        $totCorr  = 0;
+        $totCases = 0;
         foreach ($sections as $sec) {
             $secCorr  = 0;
             $secCases = $sectionCases[$sec['id']] ?? 0;
-            foreach ($cdata['items'] as $ino) {
+            foreach ($items as $ino) {
                 $secCorr += $icc[$sec['id']][$ino] ?? 0;
             }
             $pctSec = $secCases > 0 ? round($secCorr / $secCases * 100, 2) : '—';
@@ -479,35 +391,17 @@ if (!empty($compMapRows)) {
         }
         $overallPct = $totCases > 0 ? round($totCorr / $totCases * 100, 2) : '—';
 
-        $sheet3->setCellValueByColumnAndRow($col++, $cr, $cdata['code']);
-        $sheet3->setCellValueByColumnAndRow($col++, $cr, $cdata['description']);
-        $sheet3->setCellValueByColumnAndRow($col++, $cr, $itemsLabel);
+        $xl->cell($si3, $row3, $col++, $cdata['code']);
+        $xl->cell($si3, $row3, $col++, $cdata['description']);
+        $xl->cell($si3, $row3, $col++, $itemsLabel);
         foreach ($secPcts as $sp) {
-            $sheet3->setCellValueByColumnAndRow($col++, $cr, $sp);
+            $xl->cell($si3, $row3, $col++, $sp, is_numeric($sp) ? mpsStyle((float)$sp) : 0);
         }
-        $sheet3->setCellValueByColumnAndRow($col, $cr, $overallPct);
-
-        // Color-code overall %
-        if (is_numeric($overallPct)) {
-            $clrArg = $overallPct >= 75 ? 'FF90EE90' : ($overallPct >= 50 ? 'FFFFD966' : 'FFFF9999');
-            $colLtr = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col);
-            $sheet3->getStyle("{$colLtr}{$cr}")->getFill()
-                ->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB($clrArg);
-        }
-        $cr++;
-    }
-
-    foreach (range(1, $compLastCol) as $ci) {
-        $sheet3->getColumnDimensionByColumn($ci)->setAutoSize(true);
+        $xl->cell($si3, $row3, $col, $overallPct, is_numeric($overallPct) ? mpsStyle((float)$overallPct) : 0);
+        $row3++;
     }
 }
 
 // ---- Output ----
 $filename = preg_replace('/[^a-z0-9_-]/i', '_', $asmt['title']) . '_MPS_ItemAnalysis.xlsx';
-header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-header('Content-Disposition: attachment; filename="' . $filename . '"');
-header('Cache-Control: max-age=0');
-
-$writer = new Xlsx($ss);
-$writer->save('php://output');
-exit;
+$xl->output($filename);

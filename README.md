@@ -8,7 +8,7 @@ Schools Division of Biñan City · Region IV-A CALABARZON
 - PHP 8.0+, PDO + prepared statements, MySQL / MariaDB
 - Sessions, `password_hash` / `password_verify`, CSRF tokens
 - Chart.js 4 via CDN
-- **PhpSpreadsheet** via Composer (Excel export — server-side)
+- **MiniXlsx** — a dependency-free, ZipArchive-based .xlsx writer built into `includes/MiniXlsx.php` (Excel export — server-side, no Composer/vendor needed)
 - No framework; portable to any cPanel shared host
 
 ---
@@ -18,19 +18,12 @@ Schools Division of Biñan City · Region IV-A CALABARZON
 ### 1. Place files
 Copy the entire `mps/` folder to `C:\xampp\htdocs\mps\`.
 
-### 2. Install PHP dependencies (PhpSpreadsheet)
-Open a terminal in `C:\xampp\htdocs\mps\` and run:
-```bash
-composer install
-```
-This creates the `vendor/` directory (~50 MB). If you don't have Composer, download it from https://getcomposer.org/.
-
-### 3. Create the database
+### 2. Create the database
 1. Start XAMPP (Apache + MySQL).
 2. Open **phpMyAdmin** → New database → name it `mps_db` → Collation: `utf8mb4_unicode_ci`.
 3. Select `mps_db` → Import → choose `schema.sql` → Go.
 
-### 4. Seed initial data
+### 3. Seed initial data
 Browse to:
 ```
 http://localhost/mps/setup.php
@@ -45,7 +38,7 @@ This inserts:
 
 **Delete `setup.php` after running it.** It will refuse to run a second time if the admin already exists.
 
-### 5. Access the system
+### 4. Access the system
 ```
 http://localhost/mps/
 ```
@@ -73,7 +66,7 @@ define('DB_PASS', 'yourpassword');  // your DB password
 ```
 
 ### 4. Upload files
-Upload ALL files including the `vendor/` directory (run `composer install` locally first, then upload `vendor/`). The `vendor/` folder must be present for Excel export to work.
+Upload all files as-is. Excel export uses the dependency-free `includes/MiniXlsx.php` writer — no `vendor/` directory or Composer step needed.
 
 ### 5. Update base path (if not in root)
 If the app is NOT at the root of your domain (e.g., it's at `yourdomain.com/mps/`), the current `Location:` headers (`/mps/...`) already account for this. If your folder name differs, do a project-wide search-and-replace on `/mps/` with your actual path.
@@ -100,13 +93,12 @@ mps/
 ├── script.js               Chart.js rendering + live table computation
 ├── schema.sql              MySQL DDL (tables + indexes)
 ├── setup.php               One-time seed script (delete after use!)
-├── composer.json           PhpSpreadsheet dependency
-├── vendor/                 Composer packages (generate with composer install)
 ├── includes/
 │   ├── config.php          DB credentials + school constants + mastery bands
 │   ├── db.php              PDO singleton
 │   ├── auth.php            Session helpers, CSRF, role guards
-│   └── functions.php       PHP compute helpers (MPS, bands, display_name)
+│   ├── functions.php       PHP compute helpers (MPS, bands, display_name)
+│   └── MiniXlsx.php        Dependency-free .xlsx writer (used by every Excel export)
 └── api/
     ├── logout.php
     ├── create_assessment.php
@@ -117,7 +109,8 @@ mps/
     ├── get_teachers.php        Admin: pending + active teacher list
     ├── approve_assessment.php  Admin: approve or return with remarks
     ├── manage_teacher.php      Admin: approve or deactivate teacher
-    └── export_excel.php        Download .xlsx (PhpSpreadsheet)
+    ├── export_excel.php        Download .xlsx for one assessment (MiniXlsx)
+    └── export_subject_report.php Admin: school-wide subject report (MiniXlsx)
 ```
 
 ---
@@ -138,7 +131,7 @@ All thresholds live in `includes/config.php` under `MASTERY_BANDS` and `MASTERY_
 ---
 
 ## Excel Export
-Uses **PhpSpreadsheet** (server-side). Requires the `vendor/` folder.
+Uses **MiniXlsx** (`includes/MiniXlsx.php`), a small ZipArchive-based writer with no external dependencies — nothing to install, on XAMPP or on a shared host.
 The exported `.xlsx` has three sheets:
 - **MPS** — Frequency of Scores table + CASES/MEAN/MPS/bands/NPWRM summary
 - **ITEM ANALYSIS** — % correct per item per section
