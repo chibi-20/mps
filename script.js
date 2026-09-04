@@ -529,7 +529,7 @@ function buildMpsTable(data) {
         const td0 = tr.insertCell(); td0.textContent = score; td0.className = 'row-label';
 
         let rowTotalF = 0;
-        sections.forEach(sec => {
+        sections.forEach((sec, secIdx) => {
             const savedF = sf[sec.id]?.[score] ?? 0;
             const cellF  = tr.insertCell();
             if (locked) {
@@ -538,8 +538,11 @@ function buildMpsTable(data) {
                 const inp = document.createElement('input');
                 inp.type = 'number'; inp.min = 0; inp.max = 9999;
                 inp.value = savedF || '';
+                inp.className = 'grid-cell';
                 inp.dataset.score  = score;
                 inp.dataset.secId  = sec.id;
+                inp.dataset.row    = totalItems - score;
+                inp.dataset.col    = secIdx;
                 inp.addEventListener('input', onMpsInput);
                 cellF.appendChild(inp);
             }
@@ -597,6 +600,7 @@ function buildMpsTable(data) {
     ntr.insertCell().className = 'total-col';
     ntr.insertCell().className = 'total-col';
 
+    initGridPasteNav(tbl);
     recomputeMps();
 }
 
@@ -606,6 +610,105 @@ function addTH(row, text, span) {
     if (span) th.colSpan = span;
     row.appendChild(th);
     return th;
+}
+
+// ============================================================
+// Grid paste + arrow-key navigation (Excel-style), shared by the
+// MPS and Item Analysis score-entry tables. Each editable cell carries
+// data-row/data-col (stable per table: row = score/item position, col =
+// section index) so a target cell can be found directly without walking
+// the DOM. Scoped per-table via closest('table') so the two grids never
+// bleed into each other.
+// ============================================================
+function initGridPasteNav(tbl) {
+    if (!tbl) return;
+    tbl.querySelectorAll('input.grid-cell').forEach(input => {
+        if (input.dataset.gridWired) return; // don't double-attach on rebuild
+        input.dataset.gridWired = '1';
+        input.addEventListener('paste', onGridPaste);
+        input.addEventListener('keydown', onGridKeydown);
+    });
+}
+
+function gridCellAt(tbl, row, col) {
+    return tbl.querySelector(`input.grid-cell[data-row="${row}"][data-col="${col}"]`);
+}
+
+function onGridPaste(e) {
+    const clipboard = e.clipboardData || window.clipboardData;
+    const text = clipboard ? clipboard.getData('text') : '';
+    if (!text) return;
+
+    // Excel copies a multi-cell selection as tab/newline-delimited text; a lone value has
+    // neither, so let the browser's normal single-cell paste handle that case untouched.
+    if (text.indexOf('\t') === -1 && text.indexOf('\n') === -1) return;
+    e.preventDefault();
+
+    const input = e.target;
+    const tbl = input.closest('table');
+    if (!tbl) return;
+
+    const rows = text.replace(/\r/g, '').split('\n');
+    if (rows.length && rows[rows.length - 1] === '') rows.pop(); // trailing newline from Excel
+
+    const startRow = +input.dataset.row;
+    const startCol = +input.dataset.col;
+
+    rows.forEach((rowText, rOffset) => {
+        rowText.split('\t').forEach((rawValue, cOffset) => {
+            const target = gridCellAt(tbl, startRow + rOffset, startCol + cOffset);
+            if (!target || target.disabled) return;
+            target.value = rawValue.trim();
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    });
+}
+
+// type="number" doesn't support selection APIs consistently across browsers — treat
+// "position unknown" as "at the edge" so the arrow-key jump is never silently blocked.
+function gridCaretAtStart(input) {
+    try {
+        const s = input.selectionStart, e = input.selectionEnd;
+        if (s === null || e === null) return true;
+        return s === 0 && e === 0;
+    } catch (err) { return true; }
+}
+
+function gridCaretAtEnd(input) {
+    try {
+        const s = input.selectionStart, e = input.selectionEnd;
+        if (s === null || e === null) return true;
+        return s === input.value.length && e === input.value.length;
+    } catch (err) { return true; }
+}
+
+function onGridKeydown(e) {
+    const input = e.target;
+    const tbl = input.closest('table');
+    if (!tbl) return;
+    const row = +input.dataset.row;
+    const col = +input.dataset.col;
+    let target = null;
+
+    if (e.key === 'ArrowUp') {
+        target = gridCellAt(tbl, row - 1, col);
+    } else if (e.key === 'ArrowDown') {
+        target = gridCellAt(tbl, row + 1, col);
+    } else if (e.key === 'ArrowLeft') {
+        if (!gridCaretAtStart(input)) return;
+        target = gridCellAt(tbl, row, col - 1);
+    } else if (e.key === 'ArrowRight') {
+        if (!gridCaretAtEnd(input)) return;
+        target = gridCellAt(tbl, row, col + 1);
+    } else {
+        return;
+    }
+
+    if (target && !target.disabled) {
+        e.preventDefault();
+        target.focus();
+        target.select();
+    }
 }
 
 function onMpsInput(e) {
@@ -760,7 +863,7 @@ function buildItemTable(data) {
             }
         }
 
-        sections.forEach(sec => {
+        sections.forEach((sec, secIdx) => {
             const savedF = icc[sec.id]?.[item] ?? 0;
             const cases  = mpsSecCases[sec.id] || 0;
             const cellF  = tr.insertCell();
@@ -770,8 +873,11 @@ function buildItemTable(data) {
                 const inp = document.createElement('input');
                 inp.type = 'number'; inp.min = 0; inp.max = cases || 9999;
                 inp.value = savedF || '';
+                inp.className = 'grid-cell';
                 inp.dataset.item  = item;
                 inp.dataset.secId = sec.id;
+                inp.dataset.row   = item - 1;
+                inp.dataset.col   = secIdx;
                 inp.addEventListener('input', () => onItemInput(tr, data));
                 cellF.appendChild(inp);
             }
@@ -807,6 +913,7 @@ function buildItemTable(data) {
     totRow.insertCell().className = 'total-col';
     totRow.insertCell().className = 'total-col';
 
+    initGridPasteNav(tbl);
     recomputeItemTotals();
 }
 
