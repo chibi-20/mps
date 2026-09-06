@@ -1382,6 +1382,7 @@ async function loadSubmissions() {
     tbody.innerHTML = '';
     (data.submissions || []).forEach(row => {
         const tr = tbody.insertRow();
+        tr.dataset.status = row.status;
         tr.innerHTML = `
             <td class="text-left">${escHtml(row.teacher_name)}</td>
             <td class="text-left">${escHtml(row.title)}</td>
@@ -1402,6 +1403,26 @@ async function loadSubmissions() {
                         onclick="adminDeleteAssessment(this)">Delete</button>
             </td>`;
     });
+    filterComplianceTable();
+}
+
+// ---- Submission Compliance: search + status filter ----
+function filterComplianceTable() {
+    const q      = (document.getElementById('subCompSearch')?.value || '').toLowerCase().trim();
+    const status = document.getElementById('subCompStatusFilter')?.value || '';
+    const rows   = document.querySelectorAll('#complianceTbody tr');
+    let shown = 0;
+
+    rows.forEach(tr => {
+        const matchesText   = !q || tr.textContent.toLowerCase().includes(q);
+        const matchesStatus = !status || tr.dataset.status === status;
+        const visible = matchesText && matchesStatus;
+        tr.style.display = visible ? '' : 'none';
+        if (visible) shown++;
+    });
+
+    const countEl = document.getElementById('subCompCount');
+    if (countEl) countEl.textContent = rows.length ? `${shown} of ${rows.length} shown` : '';
 }
 
 async function approveAssessment(id, teacherId) {
@@ -1428,6 +1449,7 @@ async function adminDeleteAssessment(btn) {
     if (r.error) { showToast(r.error, 'error'); return; }
     btn.closest('tr')?.remove();
     showToast(r.whole_assessment_deleted ? 'Assessment deleted.' : 'Submission deleted.');
+    filterComplianceTable();
     refreshDashboard();
 }
 

@@ -214,7 +214,20 @@ unset($_t);
 ============================================================ -->
 <div id="panel-submissions" class="admin-panel" style="display:none">
     <div class="card">
-        <h3 class="card-title">Submission Compliance</h3>
+        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
+            <h3 class="card-title" style="margin:0">Submission Compliance</h3>
+            <input type="text" id="subCompSearch" placeholder="Search teacher, assessment, or subject&hellip;"
+                   oninput="filterComplianceTable()"
+                   style="flex:1;min-width:200px;max-width:320px">
+            <select id="subCompStatusFilter" onchange="filterComplianceTable()">
+                <option value="">All Statuses</option>
+                <option value="draft">Draft</option>
+                <option value="submitted">Submitted</option>
+                <option value="approved">Approved</option>
+                <option value="returned">Returned</option>
+            </select>
+            <span id="subCompCount" class="text-muted" style="font-size:.85rem"></span>
+        </div>
         <div class="table-scroll">
             <table id="complianceTable" class="data-table">
                 <thead><tr><th>Teacher</th><th>Assessment</th><th>Subject</th><th>Term</th><th>Status</th><th>Actions</th></tr></thead>
