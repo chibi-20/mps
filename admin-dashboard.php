@@ -226,11 +226,17 @@ unset($_t);
                 <option value="approved">Approved</option>
                 <option value="returned">Returned</option>
             </select>
+            <select id="subCompTermFilter" onchange="filterComplianceTable()">
+                <option value="">All Terms</option>
+            </select>
+            <select id="subCompTypeFilter" onchange="filterComplianceTable()">
+                <option value="">All Types</option>
+            </select>
             <span id="subCompCount" class="text-muted" style="font-size:.85rem"></span>
         </div>
         <div class="table-scroll">
             <table id="complianceTable" class="data-table">
-                <thead><tr><th>Teacher</th><th>Assessment</th><th>Subject</th><th>Term</th><th>Status</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Teacher</th><th>Assessment</th><th>Subject</th><th>Term</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody id="complianceTbody"></tbody>
             </table>
         </div>

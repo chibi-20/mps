@@ -1374,6 +1374,8 @@ function renderHeatmap(heatmap) {
 }
 
 // ---- SUBMISSIONS ----
+const ASMT_TYPE_LABELS = { summative: 'Summative Test', term_exam: 'Term Exam', periodic: 'Periodic Test' };
+
 async function loadSubmissions() {
     const data = await apiGet('api/get_submissions.php');
     if (!data || data.error) return;
@@ -1383,11 +1385,14 @@ async function loadSubmissions() {
     (data.submissions || []).forEach(row => {
         const tr = tbody.insertRow();
         tr.dataset.status = row.status;
+        tr.dataset.term   = row.term_no;
+        tr.dataset.type   = row.type;
         tr.innerHTML = `
             <td class="text-left">${escHtml(row.teacher_name)}</td>
             <td class="text-left">${escHtml(row.title)}</td>
             <td>${escHtml(row.subject_name)}</td>
             <td>Term ${row.term_no}</td>
+            <td>${escHtml(ASMT_TYPE_LABELS[row.type] || row.type)}</td>
             <td><span class="status-chip status-${row.status}">${row.status}</span></td>
             <td>
                 ${row.status === 'submitted' ? `
@@ -1403,20 +1408,47 @@ async function loadSubmissions() {
                         onclick="adminDeleteAssessment(this)">Delete</button>
             </td>`;
     });
+    populateComplianceFacetFilters(data.submissions || []);
     filterComplianceTable();
 }
 
-// ---- Submission Compliance: search + status filter ----
+// Rebuilds the Term/Type dropdown options from whatever's actually in the
+// loaded submissions (rather than a hardcoded list), preserving the
+// admin's current picks across a reload where possible.
+function populateComplianceFacetFilters(submissions) {
+    const termSel = document.getElementById('subCompTermFilter');
+    const typeSel = document.getElementById('subCompTypeFilter');
+    if (!termSel || !typeSel) return;
+
+    const prevTerm = termSel.value;
+    const prevType = typeSel.value;
+
+    const terms = [...new Set(submissions.map(r => r.term_no))].sort((a, b) => a - b);
+    termSel.innerHTML = '<option value="">All Terms</option>'
+        + terms.map(t => `<option value="${t}">Term ${t}</option>`).join('');
+    if (terms.map(String).includes(prevTerm)) termSel.value = prevTerm;
+
+    const types = [...new Set(submissions.map(r => r.type))];
+    typeSel.innerHTML = '<option value="">All Types</option>'
+        + types.map(t => `<option value="${escHtml(t)}">${escHtml(ASMT_TYPE_LABELS[t] || t)}</option>`).join('');
+    if (types.includes(prevType)) typeSel.value = prevType;
+}
+
+// ---- Submission Compliance: search + status/term/type filters ----
 function filterComplianceTable() {
     const q      = (document.getElementById('subCompSearch')?.value || '').toLowerCase().trim();
     const status = document.getElementById('subCompStatusFilter')?.value || '';
+    const term   = document.getElementById('subCompTermFilter')?.value || '';
+    const type   = document.getElementById('subCompTypeFilter')?.value || '';
     const rows   = document.querySelectorAll('#complianceTbody tr');
     let shown = 0;
 
     rows.forEach(tr => {
         const matchesText   = !q || tr.textContent.toLowerCase().includes(q);
         const matchesStatus = !status || tr.dataset.status === status;
-        const visible = matchesText && matchesStatus;
+        const matchesTerm   = !term   || tr.dataset.term === term;
+        const matchesType   = !type   || tr.dataset.type === type;
+        const visible = matchesText && matchesStatus && matchesTerm && matchesType;
         tr.style.display = visible ? '' : 'none';
         if (visible) shown++;
     });

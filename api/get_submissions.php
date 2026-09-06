@@ -14,7 +14,7 @@ require_login('admin');
 $pdo = get_pdo();
 
 $stmt = $pdo->query(
-    "SELECT a.id, a.title, a.status, u.last_name, u.first_name, u.middle_name,
+    "SELECT a.id, a.title, a.status, a.type, u.last_name, u.first_name, u.middle_name,
             s.name AS subject_name, t.term_no, 0 AS is_shared, NULL AS teacher_id,
             a.updated_at
      FROM assessments a
@@ -25,7 +25,7 @@ $stmt = $pdo->query(
 
      UNION ALL
 
-     SELECT a.id, a.title, tae.status, u.last_name, u.first_name, u.middle_name,
+     SELECT a.id, a.title, tae.status, a.type, u.last_name, u.first_name, u.middle_name,
             s.name AS subject_name, t.term_no, 1 AS is_shared, tae.teacher_id,
             tae.updated_at
      FROM teacher_assessment_encodings tae
