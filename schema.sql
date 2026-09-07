@@ -372,3 +372,30 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
     INDEX idx_prr_status  (status),
     INDEX idx_prr_user_id (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- MIGRATION: Grade Enrollment (run once on existing installs)
+-- Manually-entered headcounts per grade level + term (matches DepEd's
+-- Consolidated Proficiency report, which carries an Annual Enrollment
+-- and a Monthly Enrollment figure per grade). Used to compute "Number
+-- of Learners Who Did Not Take the Test" against actual examinees --
+-- the system has no LIS integration, so these are admin-entered.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS grade_enrollment (
+    id             INT AUTO_INCREMENT PRIMARY KEY,
+    school_year_id INT NOT NULL,
+    grade_level    TINYINT NOT NULL,
+    term_id        INT NOT NULL,
+    annual_male    INT NOT NULL DEFAULT 0,
+    annual_female  INT NOT NULL DEFAULT 0,
+    monthly_male   INT NOT NULL DEFAULT 0,
+    monthly_female INT NOT NULL DEFAULT 0,
+    updated_by     INT NULL,
+    updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_enrollment (school_year_id, grade_level, term_id),
+    FOREIGN KEY (school_year_id) REFERENCES school_years(id) ON DELETE CASCADE,
+    FOREIGN KEY (term_id)        REFERENCES terms(id)        ON DELETE CASCADE,
+    FOREIGN KEY (updated_by)     REFERENCES users(id)        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE INDEX idx_enrollment_sy_grade ON grade_enrollment(school_year_id, grade_level);

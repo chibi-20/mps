@@ -321,6 +321,99 @@ $xl = new MiniXlsx();
 }
 
 // ===========================================================
+// SHEET 2: PROFICIENCY LEVEL — DepEd descriptor scale, aggregated
+// per grade level across every assessment included in this report
+// (mirrors the Admin Analytics "Proficiency Level per Grade Level"
+// table, including enrollment / Did Not Take when a specific term
+// was selected).
+// ===========================================================
+{
+    $PL_KEYS = array_keys(PROFICIENCY_LEVELS);
+
+    $plByGrade = [];
+    foreach ($sfByAsmt as $aId => $bySec) {
+        $asmt = $asmtById[$aId] ?? null;
+        if (!$asmt) continue;
+        $grade = (int)$asmt['grade_level'];
+        $ti    = (int)$asmt['total_items'];
+        if (!isset($plByGrade[$grade])) $plByGrade[$grade] = array_fill_keys($PL_KEYS, 0);
+        foreach ($bySec as $sid => $scores) {
+            foreach ($scores as $score => $freq) {
+                $pct = $ti > 0 ? $score / $ti * 100 : 0;
+                $plByGrade[$grade][get_proficiency_level($pct)] += $freq;
+            }
+        }
+    }
+    ksort($plByGrade);
+
+    // Enrollment only makes sense for one specific (school year, term) --
+    // averaging a headcount across multiple terms isn't meaningful.
+    $enrollmentByGrade = [];
+    if ($syId && $termId && !empty($plByGrade)) {
+        $grades = array_keys($plByGrade);
+        $eph    = implode(',', array_fill(0, count($grades), '?'));
+        $eStmt  = $pdo->prepare(
+            "SELECT grade_level, annual_male, annual_female, monthly_male, monthly_female
+             FROM grade_enrollment
+             WHERE school_year_id = ? AND term_id = ? AND grade_level IN ({$eph})"
+        );
+        $eStmt->execute([$syId, $termId, ...$grades]);
+        foreach ($eStmt->fetchAll() as $r) {
+            $enrollmentByGrade[(int)$r['grade_level']] = [
+                'annual'  => (int)$r['annual_male']  + (int)$r['annual_female'],
+                'monthly' => (int)$r['monthly_male'] + (int)$r['monthly_female'],
+            ];
+        }
+    }
+
+    $si = $xl->addSheet('PROFICIENCY LEVEL');
+    $NC = 1 + count($PL_KEYS) + 4; // Grade + PL bands + Examinees + Annual Enrollment + Monthly Enrollment + Did Not Take
+
+    $xl->colWidth($si, 1, 10);
+    for ($c = 2; $c <= $NC; $c++) $xl->colWidth($si, $c, 15);
+
+    $row = xlDepEdHeader($xl, $si, $NC);
+    $row++;
+    $xl->cell($si, $row, 1, 'PROFICIENCY LEVEL PER GRADE LEVEL', MiniXlsx::S_TITLE);
+    $xl->merge($si, $row, 1, $row, $NC);
+    $row++;
+    $xl->cell($si, $row, 1, $subjectLine, MiniXlsx::S_BOLD_CTR);
+    $xl->merge($si, $row, 1, $row, $NC);
+    $row += 2;
+
+    $col = 1;
+    $xl->cell($si, $row, $col++, 'Grade', MiniXlsx::S_HDR);
+    foreach ($PL_KEYS as $pk) {
+        $level = PROFICIENCY_LEVELS[$pk];
+        $xl->cell($si, $row, $col++, $level['label'] . ' (' . $level['min'] . '-' . $level['max'] . '%)', MiniXlsx::S_HDR);
+    }
+    $xl->cell($si, $row, $col++, 'Examinees',          MiniXlsx::S_HDR);
+    $xl->cell($si, $row, $col++, 'Annual Enrollment',  MiniXlsx::S_HDR);
+    $xl->cell($si, $row, $col++, 'Monthly Enrollment', MiniXlsx::S_HDR);
+    $xl->cell($si, $row, $col,   'Did Not Take',       MiniXlsx::S_HDR);
+    $row++;
+
+    if (empty($plByGrade)) {
+        $xl->cell($si, $row, 1, 'No data.');
+    }
+    foreach ($plByGrade as $grade => $levels) {
+        $examinees = array_sum($levels);
+        $col = 1;
+        $xl->cell($si, $row, $col++, 'Grade ' . $grade);
+        foreach ($PL_KEYS as $pk) {
+            $cnt = $levels[$pk];
+            $xl->cell($si, $row, $col++, $cnt ?: null);
+        }
+        $xl->cell($si, $row, $col++, $examinees);
+        $enr = $enrollmentByGrade[$grade] ?? null;
+        $xl->cell($si, $row, $col++, $enr ? $enr['annual']  : '—');
+        $xl->cell($si, $row, $col++, $enr ? $enr['monthly'] : '—');
+        $xl->cell($si, $row, $col,   $enr ? max(0, $enr['monthly'] - $examinees) : '—');
+        $row++;
+    }
+}
+
+// ===========================================================
 // SHEET PAIRS: MPS + IA per assessment
 // ===========================================================
 foreach ($assessments as $asmt) {

@@ -1355,6 +1355,10 @@ function renderPLDistTable(data) {
     if (!tbl) return;
 
     const grades = data.pl_distribution || [];
+    const hint   = document.getElementById('plEnrollmentHint');
+    const termChosen = !!document.getElementById('f_term')?.value;
+    if (hint) hint.style.display = termChosen ? 'none' : '';
+
     if (!grades.length) {
         tbl.innerHTML = '<tbody><tr><td class="text-muted" style="padding:.5rem 0;border:none">No data.</td></tr></tbody>';
         return;
@@ -1365,20 +1369,79 @@ function renderPLDistTable(data) {
         const lvl = PROFICIENCY_LEVELS[pk];
         html += `<th>${escHtml(lvl.label)}<br><small class="text-muted">(${lvl.min}–${lvl.max}%)</small></th>`;
     });
-    html += '<th>Total</th></tr></thead><tbody>';
+    html += '<th>Examinees</th><th>Annual Enrollment</th><th>Monthly Enrollment</th><th>Did Not Take</th><th>Actions</th></tr></thead><tbody>';
 
     grades.forEach(g => {
-        const total = PL_KEYS.reduce((s, pk) => s + (g.levels[pk] || 0), 0);
+        const total = g.examinees ?? PL_KEYS.reduce((s, pk) => s + (g.levels[pk] || 0), 0);
         html += `<tr><td class="text-left">Grade ${g.grade_level}</td>`;
         PL_KEYS.forEach(pk => {
             const cnt = g.levels[pk] || 0;
             const pct = total > 0 ? (cnt / total * 100).toFixed(1) + '%' : '—';
             html += `<td>${cnt || 0}${cnt ? ` <span class="text-muted">(${pct})</span>` : ''}</td>`;
         });
-        html += `<td class="total-col">${total}</td></tr>`;
+        const enr = g.enrollment;
+        html += `<td class="total-col">${total}</td>`;
+        html += `<td>${enr ? enr.annual_total : '<span class="text-muted">—</span>'}</td>`;
+        html += `<td>${enr ? enr.monthly_total : '<span class="text-muted">—</span>'}</td>`;
+        html += `<td>${g.did_not_take !== null && g.did_not_take !== undefined ? g.did_not_take : '<span class="text-muted">—</span>'}</td>`;
+        html += `<td><button type="button" class="btn btn-sm btn-outline" onclick="openEnrollmentModal(${g.grade_level})">Edit Enrollment</button></td></tr>`;
     });
     html += '</tbody>';
     tbl.innerHTML = html;
+}
+
+// ---- Enrollment entry (feeds "Did Not Take the Test" above) ----
+async function openEnrollmentModal(grade) {
+    const syId   = document.getElementById('f_sy')?.value;
+    const termId = document.getElementById('f_term')?.value;
+    if (!syId || !termId) {
+        showToast('Select a specific School Year and Term first.', 'error');
+        return;
+    }
+
+    document.getElementById('enrSyId').value   = syId;
+    document.getElementById('enrGrade').value  = grade;
+    document.getElementById('enrTermId').value = termId;
+    document.getElementById('enrModalGrade').textContent = grade;
+
+    const termSel   = document.getElementById('f_term');
+    const termLabel = termSel?.options[termSel.selectedIndex]?.textContent || '';
+    document.getElementById('enrModalTermLabel').textContent = termLabel;
+
+    const data = await apiGet(`api/get_enrollment.php?sy=${syId}&grade=${grade}&term=${termId}`);
+    if (data.error) { showToast(data.error, 'error'); return; }
+
+    document.getElementById('enrAnnualMale').value    = data.annual_male;
+    document.getElementById('enrAnnualFemale').value  = data.annual_female;
+    document.getElementById('enrMonthlyMale').value   = data.monthly_male;
+    document.getElementById('enrMonthlyFemale').value = data.monthly_female;
+
+    document.getElementById('enrollmentModal').style.display = 'flex';
+}
+
+function closeEnrollmentModal() {
+    document.getElementById('enrollmentModal').style.display = 'none';
+}
+
+const frmEnrollment = document.getElementById('frmEnrollment');
+if (frmEnrollment) {
+    frmEnrollment.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const fd = new FormData(frmEnrollment);
+        const r = await apiPost('api/save_enrollment.php', {
+            school_year_id: fd.get('school_year_id'),
+            grade_level:    fd.get('grade_level'),
+            term_id:        fd.get('term_id'),
+            annual_male:    fd.get('annual_male'),
+            annual_female:  fd.get('annual_female'),
+            monthly_male:   fd.get('monthly_male'),
+            monthly_female: fd.get('monthly_female'),
+        });
+        if (r.error) { showToast(r.error, 'error'); return; }
+        showToast('Enrollment saved.');
+        closeEnrollmentModal();
+        refreshDashboard();
+    });
 }
 
 function buildLeastMasteredChart(data) {

@@ -222,6 +222,47 @@ foreach ($plByGrade as $grade => $levels) {
     $plDistribution[] = ['grade_level' => $grade, 'levels' => $levels];
 }
 
+// ---- Enrollment + "Did Not Take the Test" per grade -----------------------
+// Enrollment is manually entered per (school year, grade, term) -- only
+// computable when the admin has narrowed to one specific SY + term, since
+// a single headcount can't be meaningfully compared across multiple terms.
+if ($syId && $termId && !empty($plDistribution)) {
+    $grades = array_column($plDistribution, 'grade_level');
+    $eph    = implode(',', array_fill(0, count($grades), '?'));
+    $eStmt  = $pdo->prepare(
+        "SELECT grade_level, annual_male, annual_female, monthly_male, monthly_female
+         FROM grade_enrollment
+         WHERE school_year_id = ? AND term_id = ? AND grade_level IN ({$eph})"
+    );
+    $eStmt->execute([$syId, $termId, ...$grades]);
+    $enrollmentByGrade = [];
+    foreach ($eStmt->fetchAll() as $r) {
+        $enrollmentByGrade[(int)$r['grade_level']] = [
+            'annual_male'    => (int)$r['annual_male'],
+            'annual_female'  => (int)$r['annual_female'],
+            'annual_total'   => (int)$r['annual_male']  + (int)$r['annual_female'],
+            'monthly_male'   => (int)$r['monthly_male'],
+            'monthly_female' => (int)$r['monthly_female'],
+            'monthly_total'  => (int)$r['monthly_male'] + (int)$r['monthly_female'],
+        ];
+    }
+    foreach ($plDistribution as &$g) {
+        $examinees          = array_sum($g['levels']);
+        $enr                = $enrollmentByGrade[$g['grade_level']] ?? null;
+        $g['examinees']     = $examinees;
+        $g['enrollment']    = $enr;
+        $g['did_not_take']  = $enr ? max(0, $enr['monthly_total'] - $examinees) : null;
+    }
+    unset($g);
+} else {
+    foreach ($plDistribution as &$g) {
+        $g['examinees']    = array_sum($g['levels']);
+        $g['enrollment']   = null;
+        $g['did_not_take'] = null;
+    }
+    unset($g);
+}
+
 // ---- Item Analysis ----
 $iccStmt = $pdo->prepare(
     "SELECT icc.assessment_id, icc.section_id, icc.item_no, icc.correct_count,

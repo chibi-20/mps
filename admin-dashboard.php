@@ -180,6 +180,9 @@ unset($_t);
         <h4 class="card-title">Proficiency Level per Grade Level
             <small class="text-muted">(DepEd descriptor scale — count of learners per band, this subject)</small>
         </h4>
+        <p id="plEnrollmentHint" class="text-muted" style="font-size:.82rem;margin:-.25rem 0 .5rem">
+            Select a specific Term (not "All Terms") to enter enrollment and see how many learners did not take the test.
+        </p>
         <div class="table-scroll">
             <table id="plDistTable" class="data-table"></table>
         </div>
@@ -217,6 +220,45 @@ unset($_t);
     </div>
 
     </div><!-- /#dashboardContent -->
+
+    <!-- Enrollment Entry Modal -->
+    <div id="enrollmentModal" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+            <h3>Enrollment — Grade <span id="enrModalGrade"></span></h3>
+            <p class="text-muted" style="font-size:.85rem;margin-top:-.5rem">
+                <span id="enrModalTermLabel"></span> · manually entered, matches the DepEd Consolidated Proficiency report
+            </p>
+            <form id="frmEnrollment">
+                <input type="hidden" id="enrSyId" name="school_year_id">
+                <input type="hidden" id="enrGrade" name="grade_level">
+                <input type="hidden" id="enrTermId" name="term_id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Annual Enrollment — Male</label>
+                        <input type="number" id="enrAnnualMale" name="annual_male" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Annual Enrollment — Female</label>
+                        <input type="number" id="enrAnnualFemale" name="annual_female" min="0" value="0">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Monthly Enrollment — Male</label>
+                        <input type="number" id="enrMonthlyMale" name="monthly_male" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Monthly Enrollment — Female</label>
+                        <input type="number" id="enrMonthlyFemale" name="monthly_female" min="0" value="0">
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Enrollment</button>
+                    <button type="button" class="btn btn-outline" onclick="closeEnrollmentModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div><!-- /#panel-analytics -->
 
 <!-- ============================================================
