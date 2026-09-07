@@ -589,6 +589,21 @@ function buildMpsTable(data) {
         tr.insertCell().className = 'total-col';
     });
 
+    // Proficiency Level rows (DepEd descriptor rating scale)
+    PL_KEYS.forEach(pk => {
+        const tr = tbody.insertRow();
+        tr.className = 'band-row';
+        const td = tr.insertCell();
+        td.textContent = `${PROFICIENCY_LEVELS[pk].label} (${PROFICIENCY_LEVELS[pk].min}–${PROFICIENCY_LEVELS[pk].max}%)`;
+        td.colSpan = 1; td.className = 'row-label';
+        sections.forEach(sec => {
+            const c1 = tr.insertCell(); c1.className = `pl-${pk}-${sec.id}`;
+            const c2 = tr.insertCell(); c2.className = `plpct-${pk}-${sec.id}`;
+        });
+        tr.insertCell().className = 'total-col';
+        tr.insertCell().className = 'total-col';
+    });
+
     // NPWRM row
     const ntr = tbody.insertRow();
     ntr.className = 'summary-row';
@@ -724,10 +739,13 @@ function recomputeMps() {
     let grandCases = 0, grandFx = 0, grandNpwrm = 0;
     const grandBands = {};
     BAND_KEYS.forEach(k => grandBands[k] = 0);
+    const grandPL = {};
+    PL_KEYS.forEach(k => grandPL[k] = 0);
 
     sections.forEach(sec => {
         let cases = 0, sumFx = 0, npwrm = 0;
         const bands = {}; BAND_KEYS.forEach(k => bands[k] = 0);
+        const pls   = {}; PL_KEYS.forEach(k => pls[k] = 0);
 
         // Iterate all score rows
         tbl.querySelectorAll(`tr[data-score]`).forEach(tr => {
@@ -753,6 +771,8 @@ function recomputeMps() {
                 const pct  = score / totalItems * 100;
                 const band = getBand(pct);
                 bands[band] += f;
+                const pl = getPL(pct);
+                pls[pl] += f;
                 if (pct >= MASTERY_THRESHOLD) npwrm += f;
             }
         });
@@ -777,12 +797,19 @@ function recomputeMps() {
             setCell(`.bandpct-${bk}-${sec.id}`, cases > 0 ? prop : '—');
         });
 
+        PL_KEYS.forEach(pk => {
+            setCell(`.pl-${pk}-${sec.id}`, pls[pk] > 0 ? pls[pk] : '');
+            const prop = cases > 0 ? (pls[pk] / cases * 100).toFixed(1) + '%' : '—';
+            setCell(`.plpct-${pk}-${sec.id}`, cases > 0 ? prop : '—');
+        });
+
         setCell(`.npwrm-${sec.id}`, cases > 0 ? npwrm : '');
 
         grandCases  += cases;
         grandFx     += sumFx;
         grandNpwrm  += npwrm;
         BAND_KEYS.forEach(k => grandBands[k] += bands[k]);
+        PL_KEYS.forEach(k => grandPL[k] += pls[k]);
     });
 
     // Update row totals F/FX columns
@@ -815,6 +842,13 @@ function getBand(pct) {
         if (pct >= band.min && pct <= band.max) return key;
     }
     return 'ANM';
+}
+
+function getPL(pct) {
+    for (const [key, level] of Object.entries(PROFICIENCY_LEVELS)) {
+        if (pct >= level.min && pct <= level.max) return key;
+    }
+    return 'DNME';
 }
 
 // ---- ITEM ANALYSIS TABLE ----
@@ -1148,6 +1182,7 @@ async function refreshDashboard() {
     renderChart('chartMpsSubject',   buildMpsSubjectChart(data));
     renderChart('chartMpsGrade',     buildMpsGradeChart(data));
     renderBandDistPies(data);
+    renderPLDistTable(data);
     renderChart('chartLeastMastered',buildLeastMasteredChart(data));
     renderChart('chartMpsTrend',     buildMpsTrendChart(data));
     renderHeatmap(data.item_heatmap);
@@ -1310,6 +1345,40 @@ function renderBandDistPies(data) {
                     </span>`).join('')}
             </div>`;
     }
+}
+
+// Proficiency Level (DepEd descriptor scale) distribution per grade —
+// a table rather than pies, since this is meant to answer "how many
+// learners scored in this range", not just show a proportion.
+function renderPLDistTable(data) {
+    const tbl = document.getElementById('plDistTable');
+    if (!tbl) return;
+
+    const grades = data.pl_distribution || [];
+    if (!grades.length) {
+        tbl.innerHTML = '<tbody><tr><td class="text-muted" style="padding:.5rem 0;border:none">No data.</td></tr></tbody>';
+        return;
+    }
+
+    let html = '<thead><tr><th>Grade</th>';
+    PL_KEYS.forEach(pk => {
+        const lvl = PROFICIENCY_LEVELS[pk];
+        html += `<th>${escHtml(lvl.label)}<br><small class="text-muted">(${lvl.min}–${lvl.max}%)</small></th>`;
+    });
+    html += '<th>Total</th></tr></thead><tbody>';
+
+    grades.forEach(g => {
+        const total = PL_KEYS.reduce((s, pk) => s + (g.levels[pk] || 0), 0);
+        html += `<tr><td class="text-left">Grade ${g.grade_level}</td>`;
+        PL_KEYS.forEach(pk => {
+            const cnt = g.levels[pk] || 0;
+            const pct = total > 0 ? (cnt / total * 100).toFixed(1) + '%' : '—';
+            html += `<td>${cnt || 0}${cnt ? ` <span class="text-muted">(${pct})</span>` : ''}</td>`;
+        });
+        html += `<td class="total-col">${total}</td></tr>`;
+    });
+    html += '</tbody>';
+    tbl.innerHTML = html;
 }
 
 function buildLeastMasteredChart(data) {

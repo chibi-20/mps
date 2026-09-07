@@ -38,6 +38,20 @@ define('MASTERY_BANDS', [
     'ANM' => ['label' => 'Absolutely No Mastery',          'min' => 0,  'max' => 4],
 ]);
 
+// ============================================================
+// Proficiency levels — DepEd descriptor rating scale, applied to the
+// same (score / total items * 100) percentage as MASTERY_BANDS above,
+// just bucketed differently. Used by PHP and mirrored in script.js.
+// Format: 'KEY' => ['label', min%, max%]
+// ============================================================
+define('PROFICIENCY_LEVELS', [
+    'O'    => ['label' => 'Outstanding',                'min' => 90, 'max' => 100],
+    'VS'   => ['label' => 'Very Satisfactory',          'min' => 85, 'max' => 89],
+    'S'    => ['label' => 'Satisfactory',               'min' => 80, 'max' => 84],
+    'FS'   => ['label' => 'Fairly Satisfactory',        'min' => 75, 'max' => 79],
+    'DNME' => ['label' => 'Did Not Meet Expectations',  'min' => 0,  'max' => 74],
+]);
+
 // Subjects available for teacher self-registration
 define('AVAILABLE_SUBJECTS', [
     'Filipino', 'English', 'Math', 'Science', 'Araling Panlipunan',

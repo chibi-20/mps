@@ -212,6 +212,24 @@ foreach (MASTERY_BANDS as $bk => $band) {
     $row++;
 }
 
+// Proficiency Levels (DepEd descriptor rating scale)
+foreach (PROFICIENCY_LEVELS as $pk => $level) {
+    $col = 1;
+    $xl->cell($si1, $row, $col++, $level['label'] . ' (' . $level['min'] . '–' . $level['max'] . '%)', MiniXlsx::S_BOLD);
+    foreach ($sections as $i => $sec) {
+        $cases = $totals[$i]['f'];
+        $cnt = 0;
+        foreach ($sf[$sec['id']] ?? [] as $score => $freq) {
+            $pct2 = $totalItems > 0 ? $score / $totalItems * 100 : 0;
+            if ($pct2 >= $level['min'] && $pct2 <= $level['max']) $cnt += $freq;
+        }
+        $prop = $cases > 0 ? round($cnt / $cases * 100, 1) . '%' : '—';
+        $xl->cell($si1, $row, $col++, $cnt ?: null);
+        $xl->cell($si1, $row, $col++, $prop);
+    }
+    $row++;
+}
+
 // NPWRM
 $col = 1;
 $xl->cell($si1, $row, $col++, 'NPWRM (≥' . MASTERY_THRESHOLD . '%)', MiniXlsx::S_BOLD);

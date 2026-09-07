@@ -175,6 +175,16 @@ unset($_t);
         <div id="bandDistLegend" style="margin-top:.75rem"></div>
     </div>
 
+    <!-- Proficiency Level Distribution per Grade Level — DepEd descriptor scale -->
+    <div class="card" style="margin-top:.75rem">
+        <h4 class="card-title">Proficiency Level per Grade Level
+            <small class="text-muted">(DepEd descriptor scale — count of learners per band, this subject)</small>
+        </h4>
+        <div class="table-scroll">
+            <table id="plDistTable" class="data-table"></table>
+        </div>
+    </div>
+
     <!-- Charts Row 3 -->
     <div class="chart-grid chart-grid-2">
         <div class="card chart-card">
@@ -766,6 +776,11 @@ const BAND_KEYS       = <?= json_encode(array_keys(MASTERY_BANDS)) ?>;
 const BAND_COLORS     = {
     M:'#1a7a4a', CAM:'#52b788', MTM:'#95d5b2',
     AVR:'#ffd166', LM:'#ef8c44', VLM:'#e55934', ANM:'#9d0208'
+};
+const PROFICIENCY_LEVELS = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], PROFICIENCY_LEVELS)) ?>;
+const PL_KEYS             = <?= json_encode(array_keys(PROFICIENCY_LEVELS)) ?>;
+const PL_COLORS           = {
+    O:'#1a7a4a', VS:'#52b788', S:'#ffd166', FS:'#ef8c44', DNME:'#9d0208'
 };
 const SUBJECTS_ALL    = <?= json_encode($subjectsAll) ?>;
 const ALL_TERMS       = <?= json_encode($allTerms) ?>;

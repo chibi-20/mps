@@ -317,6 +317,8 @@ const CSRF_TOKEN         = <?= json_encode($csrf) ?>;
 const MASTERY_THRESHOLD  = <?= MASTERY_THRESHOLD ?>;
 const MASTERY_BANDS      = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], MASTERY_BANDS)) ?>;
 const BAND_KEYS          = <?= json_encode(array_keys(MASTERY_BANDS)) ?>;
+const PROFICIENCY_LEVELS = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], PROFICIENCY_LEVELS)) ?>;
+const PL_KEYS             = <?= json_encode(array_keys(PROFICIENCY_LEVELS)) ?>;
 const AVAILABLE_SECTIONS = {}; // populated per assessment
 let currentAssessmentId  = null;
 let miniChart            = null;

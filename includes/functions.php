@@ -351,6 +351,19 @@ function get_score_band(float $pct): string
     return 'Below 75';
 }
 
+/**
+ * Classify a score percentage into a DepEd descriptor rating (PROFICIENCY_LEVELS).
+ * Used by both the proficiency-level distribution (get_dashboard_data.php)
+ * and the JS getPL() mirror function.
+ */
+function get_proficiency_level(float $pct): string
+{
+    foreach (PROFICIENCY_LEVELS as $key => $level) {
+        if ($pct >= $level['min'] && $pct <= $level['max']) return $key;
+    }
+    return 'DNME';
+}
+
 function validate_int(mixed $val, int $min = 0, int $max = PHP_INT_MAX): ?int
 {
     if (!is_numeric($val)) return null;

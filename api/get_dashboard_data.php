@@ -51,6 +51,7 @@ if (empty($assessments)) {
         'mps_per_grade'                => [],
         'mps_per_subject'              => [],
         'band_distribution'            => [],
+        'pl_distribution'              => [],
         'least_mastered_items'         => [],
         'least_mastered_competencies'  => [],
         'item_heatmap'                 => ['sections'=>[],'items'=>[],'data'=>[]],
@@ -196,6 +197,29 @@ ksort($bandByGrade);
 $bandDistribution = [];
 foreach ($bandByGrade as $grade => $bands) {
     $bandDistribution[] = ['grade_level' => $grade, 'bands' => $bands];
+}
+
+// ---- Proficiency Level Distribution per Grade Level (DepEd descriptor scale) ----
+$PL_KEYS = array_keys(PROFICIENCY_LEVELS);
+$plByGrade = [];
+foreach ($sfRows as $r) {
+    $aId  = (int)$r['assessment_id'];
+    $asmt = $asmtById[$aId] ?? null;
+    if (!$asmt) continue;
+    $grade = (int)$asmt['grade_level'];
+    $ti    = (int)$asmt['total_items'];
+    $pct   = $ti > 0 ? (int)$r['score'] / $ti * 100 : 0;
+    $level = get_proficiency_level($pct);
+    $freq  = (int)$r['frequency'];
+    if (!isset($plByGrade[$grade])) {
+        $plByGrade[$grade] = array_fill_keys($PL_KEYS, 0);
+    }
+    $plByGrade[$grade][$level] += $freq;
+}
+ksort($plByGrade);
+$plDistribution = [];
+foreach ($plByGrade as $grade => $levels) {
+    $plDistribution[] = ['grade_level' => $grade, 'levels' => $levels];
 }
 
 // ---- Item Analysis ----
@@ -367,6 +391,7 @@ json_response([
     'mps_per_grade'                => $mpsPerGrade,
     'mps_per_subject'              => $mpsPerSubject,
     'band_distribution'            => $bandDistribution,
+    'pl_distribution'              => $plDistribution,
     'least_mastered_items'         => $leastMastered,
     'least_mastered_competencies'  => $leastMasteredCompetencies,
     'item_heatmap'                 => [

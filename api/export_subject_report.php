@@ -473,6 +473,23 @@ foreach ($assessments as $asmt) {
             $row++;
         }
 
+        foreach (PROFICIENCY_LEVELS as $pk => $level) {
+            $col = 1;
+            $xl->cell($si, $row, $col++, $level['label'] . ' (' . $level['min'] . '–' . $level['max'] . '%)', MiniXlsx::S_BOLD);
+            foreach ($sections as $sec) {
+                $sid = $sec['id'];
+                $c   = $secTotals[$sid]['f'];
+                $cnt = 0;
+                foreach ($sfData[$sid] ?? [] as $score => $freq) {
+                    $p = $ti > 0 ? $score / $ti * 100 : 0;
+                    if ($p >= $level['min'] && $p <= $level['max']) $cnt += $freq;
+                }
+                $xl->cell($si, $row, $col++, $cnt);
+                $xl->cell($si, $row, $col++, $c > 0 ? round($cnt / $c * 100, 1) . '%' : '—');
+            }
+            $row++;
+        }
+
         $col = 1;
         $xl->cell($si, $row, $col++, 'NPWRM (≥' . MASTERY_THRESHOLD . '%)', MiniXlsx::S_BOLD);
         foreach ($sections as $sec) {
