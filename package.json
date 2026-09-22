@@ -1,0 +1,31 @@
+{
+  "name": "mps-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "pdf-lib": "^1.17.1",
+    "prettier": "^3.9.8",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.0",
+    "vite-plugin-pwa": "^1.0.0",
+    "vitest": "^5.0.1"
+  }
+}
