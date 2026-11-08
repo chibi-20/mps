@@ -206,66 +206,90 @@ export function readSheet(image: ImageData, corners: Corners) {
 }
 export function detectCorners(image: ImageData): Corners | null {
   const { width, height, data } = image;
-  const visited = new Uint8Array(width * height);
-  const candidates: Point[] = [];
-  const minSide = Math.max(7, width * 0.009),
-    maxSide = width * 0.045;
-  for (let start = 0; start < width * height; start++) {
-    if (visited[start] || gray(data, start * 4) > 65) continue;
-    const stack = [start];
-    visited[start] = 1;
-    let count = 0,
-      minX = width,
-      minY = height,
-      maxX = 0,
-      maxY = 0;
-    while (stack.length) {
-      const index = stack.pop()!;
-      const x = index % width,
-        y = Math.floor(index / width);
-      count++;
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-      for (const next of [
-        x > 0 ? index - 1 : -1,
-        x + 1 < width ? index + 1 : -1,
-        y > 0 ? index - width : -1,
-        y + 1 < height ? index + width : -1,
-      ])
-        if (next >= 0 && !visited[next]) {
-          visited[next] = 1;
-          if (gray(data, next * 4) <= 65) stack.push(next);
-        }
+  // Do not use connected components here: a page-corner square can touch the
+  // sheet border or a dark background, which turns it into one huge component.
+  // Instead, score small solid-square windows near each image corner.
+  const shortSide = Math.min(width, height);
+  if (!width || !height || shortSide < 100) return null;
+
+  const integralWidth = width + 1;
+  const integral = new Uint32Array(integralWidth * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let rowDark = 0;
+    const rowOffset = y * width * 4;
+    const integralRow = (y + 1) * integralWidth;
+    const previousRow = y * integralWidth;
+    for (let x = 0; x < width; x++) {
+      if (gray(data, rowOffset + x * 4) < 85) rowDark++;
+      integral[integralRow + x + 1] = integral[previousRow + x + 1] + rowDark;
     }
-    const w = maxX - minX + 1,
-      h = maxY - minY + 1;
-    if (
-      w >= minSide &&
-      h >= minSide &&
-      w < maxSide &&
-      h < maxSide &&
-      w / h > 0.65 &&
-      w / h < 1.5 &&
-      count / (w * h) > 0.7
-    )
-      candidates.push({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
   }
-  if (candidates.length < 4) return null;
-  const pick = (score: (p: Point) => number) =>
-    candidates.reduce((best, p) => (score(p) > score(best) ? p : best));
-  const corners: Corners = [
-    pick((p) => -p.x - p.y),
-    pick((p) => p.x - p.y),
-    pick((p) => p.x + p.y),
-    pick((p) => -p.x + p.y),
-  ];
+  const darkCount = (left: number, top: number, side: number) => {
+    const right = left + side;
+    const bottom = top + side;
+    return integral[bottom * integralWidth + right]
+      - integral[top * integralWidth + right]
+      - integral[bottom * integralWidth + left]
+      + integral[top * integralWidth + left];
+  };
+
+  type SquareCandidate = Point & { density: number; side: number; priority: number };
+  const regionSpecs = [
+    { left: 0, top: 0, right: 0.46, bottom: 0.36, projection: (x: number, y: number) => 2 - x / width - y / height },
+    { left: 0.54, top: 0, right: 1, bottom: 0.36, projection: (x: number, y: number) => x / width + 1 - y / height },
+    { left: 0.54, top: 0.62, right: 1, bottom: 1, projection: (x: number, y: number) => x / width + y / height },
+    { left: 0, top: 0.62, right: 0.46, bottom: 1, projection: (x: number, y: number) => 1 - x / width + y / height },
+  ] as const;
+  const step = Math.max(1, Math.round(shortSide / 900));
+  const sizes = [...new Set([0.012, 0.014, 0.016, 0.018, 0.021, 0.024, 0.027].map((ratio) => Math.max(8, Math.round(shortSide * ratio))))];
+  const detected = regionSpecs.map((region) => {
+    const candidates: SquareCandidate[] = [];
+    for (const side of sizes) {
+      const half = Math.floor(side / 2);
+      const left = Math.max(0, Math.ceil(region.left * width) + half);
+      const right = Math.min(width - side, Math.floor(region.right * width) - half);
+      const top = Math.max(0, Math.ceil(region.top * height) + half);
+      const bottom = Math.min(height - side, Math.floor(region.bottom * height) - half);
+      for (let y = top; y <= bottom; y += step) {
+        for (let x = left; x <= right; x += step) {
+          const density = darkCount(x, y, side) / (side * side);
+          if (density < 0.82) continue;
+          const center = { x: x + side / 2, y: y + side / 2 };
+          candidates.push({ ...center, density, side, priority: density + region.projection(center.x, center.y) * 0.08 });
+        }
+      }
+    }
+    if (!candidates.length) return null;
+    const best = candidates.reduce((current, candidate) => candidate.priority > current.priority ? candidate : current);
+    // Dense windows overlap across the same printed square. Their centroid
+    // estimates the marker center even when a border touches one side.
+    const cluster = candidates.filter((candidate) =>
+      candidate.side === best.side &&
+      candidate.density >= best.density - 0.035 &&
+      Math.hypot(candidate.x - best.x, candidate.y - best.y) <= best.side * 0.7,
+    );
+    const count = Math.max(1, cluster.length);
+    return {
+      x: cluster.reduce((sum, candidate) => sum + candidate.x, 0) / count,
+      y: cluster.reduce((sum, candidate) => sum + candidate.y, 0) / count,
+    };
+  });
+  const topLeft = detected[0];
+  const topRight = detected[1];
+  const bottomRight = detected[2];
+  const bottomLeft = detected[3];
+  if (!topLeft || !topRight || !bottomRight || !bottomLeft) return null;
+  const corners: Corners = [topLeft, topRight, bottomRight, bottomLeft];
+  const distinct = corners.every((point, i) =>
+    corners.slice(i + 1).every((other) => Math.hypot(point.x - other.x, point.y - other.y) > shortSide * 0.2),
+  );
   if (
-    new Set(corners).size < 4 ||
-    corners[1].x - corners[0].x < width * 0.4 ||
-    corners[3].y - corners[0].y < height * 0.35
+    !distinct ||
+    topRight.x - topLeft.x < width * 0.4 ||
+    bottomLeft.y - topLeft.y < height * 0.35 ||
+    bottomRight.x < bottomLeft.x ||
+    bottomRight.y < topRight.y
   )
     return null;
-  return corners;
+  return [topLeft, topRight, bottomRight, bottomLeft];
 }
