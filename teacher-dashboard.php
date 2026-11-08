@@ -3,8 +3,8 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/functions.php';
 
 $sess = require_login('teacher');
-$uid  = (int)$sess['user_id'];
-$pdo  = get_pdo();
+$uid = (int) $sess['user_id'];
+$pdo = get_pdo();
 
 // ------------------------------------------------------------------
 // Load teacher's registered subjects from user_subjects → subjects.
@@ -26,7 +26,7 @@ $mySubjects = $subjects_stmt->fetchAll();
 if (empty($mySubjects)) {
     $dbgStmt = $pdo->prepare("SELECT COUNT(*) FROM user_subjects WHERE user_id=?");
     $dbgStmt->execute([$uid]);
-    $dbgCount = (int)$dbgStmt->fetchColumn();
+    $dbgCount = (int) $dbgStmt->fetchColumn();
     error_log("MPS: Subject dropdown empty for user_id={$uid}. "
         . "user_subjects rows={$dbgCount}. "
         . "If rows>0, the subjects table may be empty/unseeded. "
@@ -34,10 +34,10 @@ if (empty($mySubjects)) {
 }
 
 // Load active school year + terms
-$sy   = $pdo->query("SELECT id, name FROM school_years WHERE is_active=1 LIMIT 1")->fetch();
-$syId = $sy ? (int)$sy['id'] : 0;
+$sy = $pdo->query("SELECT id, name FROM school_years WHERE is_active=1 LIMIT 1")->fetch();
+$syId = $sy ? (int) $sy['id'] : 0;
 $terms = $syId ? $pdo->prepare("SELECT id, term_no, name FROM terms WHERE school_year_id=? ORDER BY term_no")
-                     ->execute([$syId]) || [] : [];
+    ->execute([$syId]) || [] : [];
 if ($syId) {
     $tStmt = $pdo->prepare("SELECT id, term_no, name FROM terms WHERE school_year_id=? ORDER BY term_no");
     $tStmt->execute([$syId]);
@@ -62,21 +62,39 @@ $aStmt = $pdo->prepare(
 $aStmt->execute([$uid]);
 $legacyAssessments = $aStmt->fetchAll();
 
-// Shared assessments the teacher has started encoding
+// Approved shared assessments the teacher can start or continue
 $sharedStmt = $pdo->prepare(
-    "SELECT a.id, a.title, a.type, a.total_items, a.date_given, tae.status, tae.remarks,
+    "SELECT a.id, a.title, a.type, a.total_items, a.date_given,
+            COALESCE(tae.status, 'ready') AS status, tae.remarks,
             a.subject_id, s.name AS subject_name, s.grade_level,
             t.term_no, t.name AS term_name, 1 AS is_shared,
-            (SELECT COUNT(*) FROM assessment_sections WHERE assessment_id = a.id) AS section_count,
-            tae.updated_at AS sort_ts
+            CASE WHEN tae.id IS NULL THEN
+                (SELECT COUNT(*) FROM teacher_assignments ta
+                 WHERE ta.teacher_id = ? AND ta.subject_id = a.subject_id AND ta.school_year_id = ?)
+            ELSE
+                (SELECT COUNT(DISTINCT ase.section_id)
+                 FROM assessment_sections ase
+                 JOIN teacher_assignments ta ON ta.section_id = ase.section_id
+                    AND ta.subject_id = a.subject_id AND ta.teacher_id = ? AND ta.school_year_id = ?
+                 WHERE ase.assessment_id = a.id)
+            END AS section_count,
+            COALESCE(tae.updated_at, a.updated_at) AS sort_ts
      FROM assessments a
      JOIN subjects s ON s.id = a.subject_id
      JOIN terms t ON t.id = a.term_id
-     JOIN teacher_assessment_encodings tae ON tae.assessment_id = a.id AND tae.teacher_id = ?
-     WHERE a.is_shared = 1
-     ORDER BY tae.updated_at DESC"
+     LEFT JOIN teacher_assessment_encodings tae ON tae.assessment_id = a.id AND tae.teacher_id = ?
+     WHERE a.is_shared = 1 AND a.status = 'approved'
+       AND EXISTS (
+           SELECT 1 FROM user_subjects us
+           WHERE us.user_id = ? AND LOWER(TRIM(us.subject_name)) = LOWER(TRIM(s.name))
+       )
+       AND EXISTS (
+           SELECT 1 FROM teacher_assignments ta
+           WHERE ta.teacher_id = ? AND ta.subject_id = a.subject_id AND ta.school_year_id = ?
+       )
+     ORDER BY sort_ts DESC"
 );
-$sharedStmt->execute([$uid]);
+$sharedStmt->execute([$uid, $syId, $uid, $syId, $uid, $uid, $uid, $syId]);
 $sharedAssessments = $sharedStmt->fetchAll();
 
 $myAssessments = [...$legacyAssessments, ...$sharedAssessments];
@@ -84,246 +102,158 @@ usort($myAssessments, fn($a, $b) => strcmp($b['sort_ts'] ?? '', $a['sort_ts'] ??
 
 $csrf = csrf_token();
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Teacher Dashboard – MPS System</title>
-<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-</head>
-<body>
+<?php
+$pageTitle = 'Teacher Dashboard';
+$activeNavPage = 'dashboard';
+$layoutBodyClass = 'teacher-dashboard layout-fixed sidebar-expand-lg bg-body-tertiary';
+$layoutHeadAssets = '<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>';
+require __DIR__ . '/includes/master_layout_start.php';
+?>
 
-<!-- ============================================================
-     TOP NAV
-============================================================ -->
-<nav class="topnav">
-    <div class="topnav-brand">
-        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
-        <span class="topnav-title">MPS &amp; Item Analysis System</span>
-    </div>
-    <div class="topnav-user">
-        <span class="user-chip teacher-chip">Teacher</span>
-        <span><?= h($sess['display']) ?></span>
-        <a href="<?= BASE_URL ?>api/logout.php" class="btn btn-sm btn-outline">Sign Out</a>
-    </div>
-</nav>
+<!-- Assessment Detail -->
+<div id="assessmentDetail" style="display:none">
 
-<div class="app-layout">
-
-<!-- ============================================================
-     LEFT SIDEBAR: ASSESSMENT LIST
-============================================================ -->
-<aside class="sidebar">
-    <div class="sidebar-header">
-        <h3>My Assessments</h3>
-        <button class="btn btn-sm btn-primary" id="btnNewAssessment">+ New</button>
-    </div>
-
-    <div id="assessmentList" class="assessment-list">
-    <?php foreach ($myAssessments as $a): ?>
-        <div class="assessment-item <?= $a['status'] === 'returned' ? 'returned' : '' ?>"
-             data-id="<?= $a['id'] ?>"
-             data-shared="<?= (int)($a['is_shared'] ?? 0) ?>"
-             onclick="loadAssessment(<?= $a['id'] ?>)">
-            <div class="ai-title"><?= h($a['title']) ?></div>
-            <div class="ai-meta">
-                <?= h($a['subject_name']) ?> G<?= $a['grade_level'] ?> &middot;
-                Term <?= $a['term_no'] ?> &middot; <?= $a['total_items'] ?> items
-                <?php if ($a['is_shared'] ?? 0): ?><span class="badge-shared">Admin</span><?php endif; ?>
-            </div>
-            <span class="status-chip status-<?= $a['status'] ?>"><?= ucfirst($a['status']) ?></span>
-            <?php if ($a['status'] === 'returned' && $a['remarks']): ?>
-            <div class="ai-remarks">Remarks: <?= h($a['remarks']) ?></div>
-            <?php endif; ?>
-            <div class="ai-footer">
-                <span class="ai-sec-count">
-                    <?= $a['section_count'] ?> section<?= $a['section_count'] == 1 ? '' : 's' ?>
-                </span>
-                <?php if ($a['status'] === 'draft' && !($a['is_shared'] ?? 0)): ?>
-                <button class="btn-del-draft"
-                        onclick="deleteAssessment(<?= $a['id'] ?>, <?= h(json_encode($a['title'])) ?>, event)"
-                        title="Delete this draft">&#x1F5D1; Delete</button>
-                <?php endif; ?>
-            </div>
-        </div>
-    <?php endforeach; ?>
-    <?php if (empty($myAssessments)): ?>
-        <p class="empty-msg">No assessments yet. Click <strong>+ New</strong> to start.</p>
-    <?php endif; ?>
-    </div>
-</aside>
-
-<!-- ============================================================
-     MAIN CONTENT AREA
-============================================================ -->
-<main class="main-content">
-
-    <!-- Select Assessment Panel (replaces old Create form) -->
-    <div id="newAssessmentPanel" class="card" style="display:none">
-        <h3 class="card-title">Select Assessment to Encode</h3>
-        <p class="text-muted" style="font-size:.88rem;margin-bottom:1rem">
-            Assessments are created by the admin. Select one below to start entering your sections' MPS and Item Analysis data.
-        </p>
-
-        <div id="selectAsmtList" class="select-asmt-list">
-            <p class="text-muted">Loading available assessments…</p>
-        </div>
-
-        <!-- Section checklist (shown after selecting an assessment) -->
-        <div id="selectAsmtSections" style="display:none">
-            <h4 style="margin:.75rem 0 .4rem;font-size:.9rem;color:var(--maroon)">
-                Your Sections for <span id="selectAsmtName"></span>
-            </h4>
-            <div id="selectSectionChecklist" class="checklist checklist--grid"></div>
-            <div class="form-actions" style="margin-top:.75rem">
-                <button class="btn btn-primary" onclick="startEncoding()">Start Encoding</button>
-                <button class="btn btn-outline" onclick="clearAsmtSelection()">← Back</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Assessment Detail -->
-    <div id="assessmentDetail" style="display:none">
-
-        <!-- Assessment header -->
-        <div class="card assessment-header">
+    <!-- Assessment header -->
+    <div class="card assessment-header mb-3">
+        <div class="assessment-header-title d-flex align-items-center w-100 justify-content-between">
             <div>
                 <h2 id="detailTitle" class="card-title"></h2>
                 <p id="detailMeta" class="text-muted"></p>
             </div>
-            <div class="assessment-actions">
-                <span id="detailStatus" class="status-chip"></span>
-                <div class="action-working-group">
-                    <button id="btnImportZipgrade" class="btn btn-import" onclick="openImportModal()">&#x2B06; Import ZipGrade</button>
-                    <button id="btnSaveDraft" class="btn btn-outline" onclick="saveData('draft')">Save Draft</button>
-                    <a id="btnExport" href="#" target="_blank" class="btn btn-outline">Export Excel</a>
-                </div>
-                <div class="action-divider"></div>
-                <div class="submit-group">
-                    <button id="btnSubmit" class="btn btn-submit-final" onclick="openSubmitModal()">&#x1F512; Submit</button>
-                    <span class="submit-hint">Locks all data</span>
-                </div>
+
+            <div>
+                <button id="btnBackToAssessments" class="btn btn-outline-secondary" type="button"
+                    onclick="backToMyAssessments()">&larr; Back to My Assessments</button>
+
             </div>
         </div>
-
-        <!-- Remarks (returned) -->
-        <div id="returnedAlert" class="alert alert-warning" style="display:none"></div>
-
-        <!-- Mini chart -->
-        <div class="card mini-chart-card">
-            <h4 class="card-title">MPS per Section</h4>
-            <canvas id="miniMpsChart" height="80"></canvas>
-        </div>
-
-        <!-- Tabs -->
-        <div class="tab-bar">
-            <button class="tab-btn active" data-tab="mps" onclick="switchTab('mps')">
-                MPS (Frequency of Scores)
-            </button>
-            <button class="tab-btn" data-tab="item" onclick="switchTab('item')">
-                Item Analysis
-            </button>
-        </div>
-
-        <!-- MPS Tab -->
-        <div id="tab-mps" class="tab-panel card">
-            <div class="table-scroll">
-                <table id="mpsTable" class="data-table mps-table"></table>
+        <div class="assessment-actions d-flex justify-content-end w-100">
+            <span id="detailStatus" class="status-chip badge"></span>
+            <div class="action-working-group">
+                <button id="btnSaveDraft" class="btn btn-sm btn-secondary" onclick="saveData('draft')">Save
+                    Draft</button>
+                <a id="btnExport" href="#" target="_blank" class="btn btn-sm btn-success">Export Excel</a>
             </div>
-        </div>
+            <div class="action-divider"></div>
+            <div class="submit-group">
+                <button id="btnSubmit" class="btn btn-sm btn-primary" onclick="openSubmitModal()"><i class="fa fa-lock"></i> Submit
 
-        <!-- Item Analysis Tab -->
-        <div id="tab-item" class="tab-panel card" style="display:none">
-            <div class="table-scroll">
-                <table id="itemTable" class="data-table item-table"></table>
+                <span class="submit-hint">Locks all data</span>
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Empty state -->
-    <div id="emptyState" class="empty-state">
-        <div class="empty-icon">📋</div>
-        <p>Select an assessment from the sidebar, or create a new one.</p>
+    <!-- Remarks (returned) -->
+    <div id="returnedAlert" class="alert alert-warning" style="display:none"></div>
+
+    <!-- Mini chart -->
+    <div class="card mini-chart-card mb-3">
+        <h4 class="card-title">MPS per Section</h4>
+        <canvas id="miniMpsChart" height="80"></canvas>
     </div>
 
-</main>
-</div><!-- /.app-layout -->
+    <!-- Tabs -->
+    <div class="tab-bar nav nav-tabs">
+        <button class="tab-btn nav-link active" data-tab="mps" onclick="switchTab('mps')">
+            MPS (Frequency of Scores)
+        </button>
+        <button class="tab-btn nav-link" data-tab="item" onclick="switchTab('item')">
+            Item Analysis
+        </button>
+    </div>
 
-<!-- ============================================================
-     SUBMIT CONFIRMATION MODAL
-============================================================ -->
-<div id="submitModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSubmitModal()">
-    <div class="modal-box">
-        <h3 class="submit-modal-title">Submit this assessment?</h3>
-        <p>Once submitted, all MPS and Item Analysis data will be <strong>locked</strong>. You will not be able to make any changes until an administrator returns it for correction.</p>
-        <div id="submitEmptyWarning" class="submit-empty-warning" style="display:none">
-            <strong>Warning — sections with no data entered:</strong>
-            <ul id="submitEmptySectionList"></ul>
-            <p>These sections will remain empty after submission. Proceed anyway?</p>
+    <!-- MPS Tab -->
+    <div id="tab-mps" class="tab-panel card">
+        <div class="table-scroll table-responsive assessment-grid-scroll">
+            <table id="mpsTable" class="data-table table align-middle mps-table" data-pagination="false"></table>
         </div>
-        <div class="form-actions" style="margin-top:1.5rem">
-            <button class="btn btn-outline" onclick="closeSubmitModal()">Cancel</button>
-            <button class="btn btn-submit-final" onclick="confirmSubmit()">&#x1F512; Yes, Submit</button>
+    </div>
+
+    <!-- Item Analysis Tab -->
+    <div id="tab-item" class="tab-panel card" style="display:none">
+        <div class="table-scroll table-responsive assessment-grid-scroll">
+            <table id="itemTable" class="data-table table align-middle item-table" data-pagination="false"></table>
         </div>
     </div>
 </div>
 
-<!-- ============================================================
-     ZIPGRADE IMPORT MODAL
-============================================================ -->
-<div id="importModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeImportModal()">
-    <div class="modal-box modal-box--wide">
-        <h3>Import ZipGrade CSV</h3>
-        <p class="text-muted" style="margin-bottom:1rem;font-size:.88rem">
-            Upload a ZipGrade CSV export for <strong>one section</strong>.
-            Preview runs first — no data is written until you confirm.
-        </p>
-
-        <form id="frmImport">
-            <input type="hidden" name="assessment_id" id="importAsmtId">
-            <div class="form-row" style="gap:1rem;margin-bottom:1rem">
-                <div class="form-group" style="margin:0;flex:1">
-                    <label>Section <span class="req">*</span></label>
-                    <select name="section_id" id="importSection" required>
-                        <option value="">— select section —</option>
-                    </select>
-                </div>
-                <div class="form-group" style="margin:0;flex:2">
-                    <label>ZipGrade CSV File <span class="req">*</span></label>
-                    <input type="file" name="csv_file" id="importFile" accept=".csv" required
-                           style="padding:.35rem .5rem">
-                </div>
-            </div>
-        </form>
-
-        <!-- Preview results area (shown after clicking Preview) -->
-        <div id="importPreviewArea" style="display:none"></div>
-
-        <div class="form-actions" style="margin-top:1.25rem">
-            <button id="btnDoPreview"  class="btn btn-primary"  onclick="doImportPreview()">Preview</button>
-            <button id="btnDoConfirm" class="btn btn-success"  onclick="doImportConfirm()" style="display:none">Confirm Import</button>
-            <button class="btn btn-outline" onclick="closeImportModal()">Cancel</button>
+<!-- Empty state -->
+<div id="emptyState" class="">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-3">
+        <div class="text-start">
+            <h1 class="h3 mb-1">My Assessments</h1>
+        </div>
+    </div>
+    <div id="assessmentList" class="card teacher-assessment-table-card">
+        <div class="table-responsive">
+            <table class="table data-table align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th>ACTIONS</th>
+                        <th>ASSESSMENT</th>
+                        <th>SUBJECT</th>
+                        <th>GRADE</th>
+                        <th>TERM</th>
+                        <th>ITEMS</th>
+                        <th>SECTIONS</th>
+                        <th>STATUS</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($myAssessments as $a): ?>
+                        <tr class="teacher-assessment-row <?= ($a['status'] ?? '') === 'returned' ? 'returned' : '' ?>"
+                            data-id="<?= (int) $a['id'] ?>">
+                            <?php $isReadyShared = !empty($a['is_shared']) && ($a['status'] ?? '') === 'ready'; ?>
+                            <td><div class="d-flex align-items-center gap-1">
+                                    <a class="btn btn-sm btn-outline-secondary action-icon" title="Download Answer Sheet" aria-label="Download Answer Sheet" href="<?= h(BASE_URL) ?>api/download_answer_sheet.php?assessment_id=<?= (int) $a['id'] ?>"><i class="bi bi-download" aria-hidden="true"></i></a>
+                                    <?php if (!empty($a['is_shared']) && !in_array(($a['status'] ?? ''), ['submitted', 'approved'], true)): ?>
+                                        <?php $encodingTitle = $isReadyShared ? 'Start Encoding' : 'Continue Encoding'; ?>
+                                        <button class="btn btn-sm btn-outline-primary assessment-row-action action-icon" title="<?= h($encodingTitle) ?>" aria-label="<?= h($encodingTitle) ?>"
+                                            onclick="startSharedAssessment(<?= (int) $a['id'] ?>, <?= (int) $a['subject_id'] ?>, this)"><i class="bi bi-pencil-square" aria-hidden="true"></i></button>
+                                    <?php elseif (($a['status'] ?? '') === 'draft' && empty($a['is_shared'])): ?>
+                                        <button class="btn btn-sm btn-outline-danger action-icon" title="Delete Assessment" aria-label="Delete Assessment"
+                                            onclick="deleteAssessment(<?= (int) $a['id'] ?>, <?= h(json_encode($a['title'])) ?>, event)"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                                    <?php else: ?>
+                                        <button class="btn btn-sm btn-outline-primary action-icon" title="Open Assessment" aria-label="Open Assessment"
+                                            onclick="loadAssessment(<?= (int) $a['id'] ?>)"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i></button>
+                                    <?php endif; ?>
+                                </div><small class="assessment-start-error d-block text-danger mt-1" role="alert"></small></td>
+                            <td><?php if ($isReadyShared): ?><span class="teacher-assessment-title"><?= h($a['title']) ?></span><?php else: ?><button type="button" class="teacher-assessment-open"
+                                    onclick="loadAssessment(<?= (int) $a['id'] ?>)"><?= h($a['title']) ?></button><?php endif; ?><?php if (!empty($a['is_shared'])): ?>
+                                    <div><span class="badge-shared">Admin</span></div>
+                                <?php endif; ?>
+                                <?php if (($a['status'] ?? '') === 'returned' && !empty($a['remarks'])): ?><small
+                                        class="d-block text-danger mt-1">Remarks: <?= h($a['remarks']) ?></small><?php endif; ?>
+                            </td>
+                            <td><?= h($a['subject_name']) ?></td>
+                            <td>Grade <?= (int) $a['grade_level'] ?></td>
+                            <td>Term <?= (int) $a['term_no'] ?></td>
+                            <td><?= (int) $a['total_items'] ?></td>
+                            <td><?= (int) $a['section_count'] ?></td>
+                            <td><span id="assessmentStatus<?= (int) $a['id'] ?>"
+                                    class="status-chip badge status-<?= h($a['status']) ?>"><?= $a['status'] === 'ready' ? 'Ready to start' : ucfirst(h($a['status'])) ?></span>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    <?php if (empty($myAssessments)): ?>
+                        <tr class="teacher-assessment-empty">
+                            <td colspan="8" class="text-center text-muted py-4">No assessments available for your assigned subjects. Ask your administrator to create one.</td>
+                        </tr><?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
 
-<!-- Data passed to JS -->
-<script>
-const BASE_URL           = <?= json_encode(BASE_URL) ?>;
-const CSRF_TOKEN         = <?= json_encode($csrf) ?>;
-const MASTERY_THRESHOLD  = <?= MASTERY_THRESHOLD ?>;
-const MASTERY_BANDS      = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], MASTERY_BANDS)) ?>;
-const BAND_KEYS          = <?= json_encode(array_keys(MASTERY_BANDS)) ?>;
-const PROFICIENCY_LEVELS = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], PROFICIENCY_LEVELS)) ?>;
-const PL_KEYS             = <?= json_encode(array_keys(PROFICIENCY_LEVELS)) ?>;
-const AVAILABLE_SECTIONS = {}; // populated per assessment
-let currentAssessmentId  = null;
-let miniChart            = null;
-let selectedSharedAsmtId = null;
-</script>
-<script src="<?= asset_url('script.js') ?>"></script>
-</body>
-</html>
+<?php
+$layoutFooterScripts = '<script>
+const BASE_URL = ' . json_encode(BASE_URL) . ';
+const CSRF_TOKEN = ' . json_encode($csrf) . ';
+const MASTERY_THRESHOLD = ' . (int) MASTERY_THRESHOLD . ';
+const MASTERY_BANDS = ' . json_encode(array_map(fn($b) => ['label' => $b['label'], 'min' => $b['min'], 'max' => $b['max']], MASTERY_BANDS)) . ';
+const BAND_KEYS = ' . json_encode(array_keys(MASTERY_BANDS)) . ';
+const PROFICIENCY_LEVELS = ' . json_encode(array_map(fn($b) => ['label' => $b['label'], 'min' => $b['min'], 'max' => $b['max']], PROFICIENCY_LEVELS)) . ';
+const PL_KEYS = ' . json_encode(array_keys(PROFICIENCY_LEVELS)) . ';
+</script><script src="' . asset_url('chartjs-adminlte-theme.js') . '"></script><script src="' . asset_url('script.js') . '"></script><script src="' . asset_url('table-pagination.js') . '"></script>';
+require __DIR__ . '/includes/master_layout_end.php';

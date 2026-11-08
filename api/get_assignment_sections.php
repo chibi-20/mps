@@ -9,6 +9,7 @@ require_once __DIR__ . '/../includes/functions.php';
 require_login('admin');
 $teacher_id = validate_int($_GET['teacher_id'] ?? null, 1);
 $subject_id = validate_int($_GET['subject_id'] ?? null, 1);
+$school_year_id = validate_int($_GET['school_year_id'] ?? null, 1);
 if (!$teacher_id || !$subject_id) json_response(['error' => 'teacher_id and subject_id required.'], 400);
 
 $pdo = get_pdo();
@@ -20,7 +21,13 @@ if (!$subjRow) json_response(['error' => 'Subject not found.'], 404);
 $grade = (int)$subjRow['grade_level'];
 
 $sy   = $pdo->query("SELECT id FROM school_years WHERE is_active=1 LIMIT 1")->fetch();
-$syId = $sy ? (int)$sy['id'] : 0;
+$syId = $school_year_id ?: ($sy ? (int)$sy['id'] : 0);
+$teacherStmt = $pdo->prepare("SELECT 1 FROM users WHERE id=? AND role='teacher'");
+$teacherStmt->execute([$teacher_id]);
+if (!$teacherStmt->fetchColumn()) json_response(['error' => 'Teacher not found.'], 404);
+$yearStmt = $pdo->prepare('SELECT 1 FROM school_years WHERE id=?');
+$yearStmt->execute([$syId]);
+if (!$syId || !$yearStmt->fetchColumn()) json_response(['error' => 'School year not found.'], 404);
 
 $secStmt = $pdo->prepare(
     "SELECT id, name FROM sections WHERE grade_level = ? AND school_year_id = ? ORDER BY name"

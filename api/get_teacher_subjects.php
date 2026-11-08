@@ -17,6 +17,7 @@ $subjStmt = $pdo->prepare(
     "SELECT s.id, s.name, s.grade_level
      FROM user_subjects us
      JOIN subjects s ON LOWER(TRIM(s.name)) = LOWER(TRIM(us.subject_name))
+     JOIN user_grade_levels ugl ON ugl.user_id=us.user_id AND ugl.grade_level=s.grade_level
      WHERE us.user_id = ?
      ORDER BY s.grade_level, s.name"
 );

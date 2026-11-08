@@ -1,7 +1,7 @@
 <?php
 /**
  * ONE-TIME SETUP SCRIPT
- * Run this ONCE in a browser after importing schema.sql.
+ * Run migrations first, then run this ONCE in a browser to seed demo/reference data.
  * It seeds all reference data and demo users.
  * DELETE OR RENAME this file after running.
  */
@@ -43,8 +43,11 @@ try {
     $pdo->prepare("INSERT INTO user_grade_levels (user_id, grade_level) VALUES (?,?)")
         ->execute([$teacherId, 10]);
 
-    $pdo->prepare("INSERT INTO user_subjects (user_id, subject_name) VALUES (?,?)")
-        ->execute([$teacherId, 'Araling Panlipunan']);
+    $teacherDemoSubjects = ['Filipino', 'English', 'Math', 'Science', 'Araling Panlipunan'];
+    $teacherSubjectProfile = $pdo->prepare("INSERT INTO user_subjects (user_id, subject_name) VALUES (?,?)");
+    foreach ($teacherDemoSubjects as $subjectName) {
+        $teacherSubjectProfile->execute([$teacherId, $subjectName]);
+    }
 
     // --------------------------------------------------------
     // SCHOOL YEAR & TERMS
@@ -72,10 +75,20 @@ try {
         'Araling Panlipunan', 'ESP', 'TLE', 'MAPEH',
         'Research', 'SPJ', 'SPS', 'SPA',
     ];
-    $subjStmt = $pdo->prepare("INSERT INTO subjects (name, grade_level) VALUES (?,?)");
+    $gradeInsert = $pdo->prepare(is_sqlite()
+        ? 'INSERT OR IGNORE INTO grade_levels (level) VALUES (?)'
+        : 'INSERT IGNORE INTO grade_levels (level) VALUES (?)');
+    $gradeSelect = $pdo->prepare('SELECT id FROM grade_levels WHERE level=?');
+    $gradeIds = [];
+    foreach ([7, 8, 9, 10] as $gl) {
+        $gradeInsert->execute([$gl]);
+        $gradeSelect->execute([$gl]);
+        $gradeIds[$gl] = (int)$gradeSelect->fetchColumn();
+    }
+    $subjStmt = $pdo->prepare("INSERT INTO subjects (name, grade_level, grade_level_id) VALUES (?,?,?)");
     foreach ([7, 8, 9, 10] as $gl) {
         foreach ($subjectNames as $sn) {
-            $subjStmt->execute([$sn, $gl]);
+            $subjStmt->execute([$sn, $gl, $gradeIds[$gl]]);
         }
     }
     // AP Grade 10 = subject_id 41
@@ -105,27 +118,35 @@ try {
         'Cenon Rivera','Ildefonso Santos',
     ];
 
-    $secStmt = $pdo->prepare("INSERT INTO sections (school_year_id, grade_level, name) VALUES (?,?,?)");
+    $secStmt = $pdo->prepare("INSERT INTO sections (school_year_id, grade_level, grade_level_id, name) VALUES (?,?,?,?)");
     foreach ($grade9Sections as $sn) {
-        $secStmt->execute([$syId, 9, $sn]);
+        $secStmt->execute([$syId, 9, $gradeIds[9], $sn]);
     }
     foreach ($grade10Sections as $sn) {
-        $secStmt->execute([$syId, 10, $sn]);
+        $secStmt->execute([$syId, 10, $gradeIds[10], $sn]);
     }
     // Grade 9:  section ids  1-30
     // Grade 10: section ids 31-60
     // Chabet=37, Coching=38, Edades=39, Legaspi=46, Leynes=47, Locsin=48, Santos=60
 
     // --------------------------------------------------------
-    // TEACHER ASSIGNMENTS  (CANTURIA → AP10 → 7 sections)
+    // TEACHER ASSIGNMENTS  (CANTURIA → five core subjects → 7 sections)
     // --------------------------------------------------------
     $taSecIds = [37, 38, 39, 46, 47, 48, 60]; // Chabet, Coching, Edades, Legaspi, Leynes, Locsin, Santos
     $taStmt = $pdo->prepare(
         "INSERT INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id)
          VALUES (?,?,?,?)"
     );
+    $demoSubjectIds = [];
+    $demoSubjectLookup = $pdo->prepare('SELECT id FROM subjects WHERE grade_level = ? AND name = ?');
+    foreach ($teacherDemoSubjects as $subjectName) {
+        $demoSubjectLookup->execute([10, $subjectName]);
+        $demoSubjectIds[] = (int)$demoSubjectLookup->fetchColumn();
+    }
     foreach ($taSecIds as $sid) {
-        $taStmt->execute([$teacherId, $apGrade10SubjId, $sid, $syId]);
+        foreach ($demoSubjectIds as $subjectId) {
+            $taStmt->execute([$teacherId, $subjectId, $sid, $syId]);
+        }
     }
 
     // --------------------------------------------------------

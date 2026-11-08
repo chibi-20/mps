@@ -40,34 +40,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $csrf = csrf_token();
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Set New Password – MPS System</title>
-<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
-</head>
-<body class="auth-page">
-<div class="login-split">
-
-    <div class="login-brand">
-        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
-        <p class="login-brand-name">Jacobo Z. Gonzales Memorial National High School</p>
-        <p class="login-brand-division">Schools Division of Biñan City &middot; Region IV-A CALABARZON</p>
-        <hr class="login-brand-divider">
-        <p class="login-brand-tagline">MPS &amp; Item Analysis System</p>
-    </div>
-
-    <div class="login-form-panel">
-        <div class="login-card">
+<?php
+$layoutVariant = 'auth';
+$pageTitle = 'Set New Password';
+$layoutBodyClass = 'auth-page login-page';
+require __DIR__ . '/includes/master_layout_start.php';
+?>
+<div class="login-box mps-auth-box">
+    <div class="card card-outline card-primary">
+        <div class="card-header text-center">
+            <a class="h1 text-decoration-none" href="<?= BASE_URL ?>index.php"><img src="<?= BASE_URL ?>assets/logo.png" alt="" class="auth-logo"> MPS</a>
+            <p class="text-secondary mb-0">Jacobo Z. Gonzales Memorial National High School</p>
+        </div>
+        <div class="card-body">
             <h2 class="login-card-title">Set New Password</h2>
             <p class="login-card-subtitle">
                 Your password was reset by an administrator. You must choose a new password before continuing.
             </p>
 
-            <div class="alert" style="background:rgba(199,154,58,.12);border:1.5px solid var(--gold);border-radius:.5rem;padding:.75rem 1rem;margin-bottom:1rem;font-size:.875rem">
+            <div class="alert alert-info">
                 Signed in as <strong><?= h($sess['display']) ?></strong>
             </div>
 
@@ -83,17 +74,16 @@ $csrf = csrf_token();
                 <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
                 <div class="form-group">
                     <label for="new_password">New Password <span class="req">*</span> <small>(min. 8 chars)</small></label>
-                    <input type="password" id="new_password" name="new_password" required autocomplete="new-password" autofocus>
+                    <input class="form-control" type="password" id="new_password" name="new_password" required autocomplete="new-password" autofocus>
                 </div>
                 <div class="form-group">
                     <label for="confirm_password">Confirm New Password <span class="req">*</span></label>
-                    <input type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password">
+                    <input class="form-control" type="password" id="confirm_password" name="confirm_password" required autocomplete="new-password">
                 </div>
-                <button type="submit" class="btn btn-primary btn-full">Save New Password</button>
+                <button type="submit" class="btn btn-primary w-100">Save New Password</button>
             </form>
         </div>
     </div>
 
 </div>
-</body>
-</html>
+<?php require __DIR__ . '/includes/master_layout_end.php'; ?>

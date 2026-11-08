@@ -69,6 +69,20 @@ $chk->execute([$assessment_id, $section_id]);
 if (!$chk->fetch()) {
     json_response(['error' => 'Section does not belong to this assessment.'], 403);
 }
+$assignment = $pdo->prepare(
+    "SELECT 1 FROM teacher_assignments ta
+     JOIN assessments a ON a.id=? AND a.subject_id=ta.subject_id
+     JOIN terms t ON t.id=a.term_id AND t.school_year_id=ta.school_year_id
+     WHERE ta.teacher_id=? AND ta.section_id=?"
+);
+$assignment->execute([$assessment_id, $uid, $section_id]);
+if (!$assignment->fetchColumn()) json_response(['error' => 'You are not assigned to this section for the assessment subject and school year.'], 403);
+$modeStmt = $pdo->prepare('SELECT mode FROM assessment_section_ingestion_modes WHERE assessment_id=? AND section_id=?');
+$modeStmt->execute([$assessment_id, $section_id]);
+$ingestionMode = $modeStmt->fetchColumn();
+if ($action === 'confirm' && $ingestionMode === 'scanner') {
+    json_response(['error' => 'This assessment section already has scanner submissions. Choose one import method for the section or clear its previous results before switching.'], 409);
+}
 
 // ---------------------------------------------------------------
 // File validation
@@ -296,6 +310,10 @@ try {
     // Delete existing data for (assessment, section) — clean re-import
     $pdo->prepare("DELETE FROM score_frequencies   WHERE assessment_id = ? AND section_id = ?")
         ->execute([$assessment_id, $section_id]);
+    if ($ingestionMode === false) {
+        $pdo->prepare("INSERT INTO assessment_section_ingestion_modes (assessment_id,section_id,mode) VALUES (?,?,'zipgrade')")
+            ->execute([$assessment_id, $section_id]);
+    }
     $pdo->prepare("DELETE FROM item_correct_counts WHERE assessment_id = ? AND section_id = ?")
         ->execute([$assessment_id, $section_id]);
 
@@ -316,10 +334,10 @@ try {
     }
 
     if ($isShared) {
-        $pdo->prepare("UPDATE teacher_assessment_encodings SET updated_at = NOW() WHERE assessment_id = ? AND teacher_id = ?")
+        $pdo->prepare("UPDATE teacher_assessment_encodings SET updated_at = CURRENT_TIMESTAMP WHERE assessment_id = ? AND teacher_id = ?")
             ->execute([$assessment_id, $uid]);
     } else {
-        $pdo->prepare("UPDATE assessments SET updated_at = NOW() WHERE id = ?")
+        $pdo->prepare("UPDATE assessments SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
             ->execute([$assessment_id]);
     }
 

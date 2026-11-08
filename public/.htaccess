@@ -1,0 +1,12 @@
+<IfModule mod_mime.c>
+    AddType application/manifest+json .webmanifest
+    AddType application/wasm .wasm
+</IfModule>
+
+<IfModule mod_headers.c>
+    <FilesMatch "^(index\.html|sw\.js|registerSW\.js|workbox-.*\.js)$">
+        Header set Cache-Control "no-cache, no-store, must-revalidate"
+    </FilesMatch>
+</IfModule>
+
+Options -Indexes

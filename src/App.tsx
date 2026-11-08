@@ -1,62 +1,86 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  ArrowRight,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  Code2,
-  Copy,
-  Download,
-  FileText,
-  Layers,
-  Plus,
-  ScanLine,
-  Sparkles,
-  Trash2,
-  Upload,
-  Camera,
-  WifiOff,
-} from "lucide-react";
-import type { DocumentMeta, Field, TextLine } from "./types";
-import {
-  closeDocument,
-  localOcr,
-  openDocument,
-  renderPage,
-  type ScanSource,
-} from "./services/ocr";
-import { maxFileMb, validateFile, downloadJson } from "./services/files";
-import { parseLines, validateFields } from "./services/parser";
-import { buildPayload } from "./services/payload";
-import { documentApi, mockMode } from "./services/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Camera, Check, ChevronRight, FileText, ScanLine, Trash2, Upload, WifiOff } from "lucide-react";
+import type { Field } from "./types";
+import { closeDocument, openDocument, type ScanSource } from "./services/ocr";
+import { maxFileMb, validateFile } from "./services/files";
+import { logoutMps, submitMpsScan, type MpsScan, type ScannerSession } from "./services/api";
 import CameraCapture from "./components/CameraCapture";
 import InstallButton from "./components/InstallButton";
 import AnswerSheetScanner from "./components/AnswerSheetScanner";
+import ScannerSignIn from "./components/ScannerSignIn";
+
 export default function App() {
+  const [mpsUrlConfig] = useState(() => {
+    const fromDashboard = new URLSearchParams(window.location.search).get("mps_url");
+    if (fromDashboard) {
+      localStorage.setItem("mps-suggested-url", fromDashboard);
+      localStorage.setItem("mps-url-source", "teacher-dashboard");
+      return { url: fromDashboard, fromDashboard: true };
+    }
+    const cached = localStorage.getItem("mps-suggested-url");
+    return {
+      url: cached || import.meta.env.VITE_API_BASE_URL || "",
+      fromDashboard: localStorage.getItem("mps-url-source") === "teacher-dashboard" || !!cached,
+    };
+  });
+  const [session, setSession] = useState<ScannerSession | null>(() => {
+    try {
+      const saved = localStorage.getItem("mps-scanner-session");
+      if (!saved) return null;
+      const parsed = JSON.parse(saved) as ScannerSession;
+      return Date.parse(parsed.expiresAt) > Date.now() ? parsed : null;
+    } catch { return null; }
+  });
+  const onSessionExpired = useCallback(() => {
+    localStorage.removeItem("mps-scanner-session");
+    setSession(null);
+  }, []);
   const [source, setSource] = useState<ScanSource | null>(null);
-  const [mode, setMode] = useState<"document" | "answerSheet">("document");
   const sourceRef = useRef<ScanSource | null>(null);
-  const [meta, setMeta] = useState<DocumentMeta | null>(null);
-  const [page, setPage] = useState(1);
   const [fields, setFields] = useState<Field[]>([]);
-  const [unmatched, setUnmatched] = useState<TextLine[]>([]);
-  const [raw, setRaw] = useState("");
   const [scanned, setScanned] = useState(false);
   const [busy, setBusy] = useState(false);
-  const lock = useRef(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState("");
+  const [drag, setDrag] = useState(false);
+  const [camera, setCamera] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [camera, setCamera] = useState(false);
-  const [tab, setTab] = useState<"fields" | "json">("fields");
-  const [drag, setDrag] = useState(false);
-  const [apiState, setApiState] = useState<
-    "idle" | "loading" | "success" | "error"
-  >("idle");
   const [online, setOnline] = useState(navigator.onLine);
+  const [pendingScans, setPendingScans] = useState<MpsScan[]>([]);
+  const [syncBusy, setSyncBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const preview = useRef<HTMLDivElement>(null);
+  const lock = useRef(false);
+  const outboxKey = session ? `mps-scanner-outbox:${session.baseUrl}:${session.teacherId}` : "";
+
+  useEffect(() => {
+    const suppliedUrl = new URLSearchParams(window.location.search).get("mps_url");
+    sessionStorage.removeItem("mps-scanner-token");
+    sessionStorage.removeItem("mps-api-base");
+    localStorage.removeItem("mps-scanner-token");
+    localStorage.removeItem("mps-api-base");
+    if (suppliedUrl) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("mps_url");
+      window.history.replaceState({}, "", url.pathname + url.hash);
+    }
+    if (!session) return;
+    const delay = Date.parse(session.expiresAt) - Date.now();
+    if (delay <= 0) { onSessionExpired(); return; }
+    const timer = window.setTimeout(onSessionExpired, delay);
+    return () => window.clearTimeout(timer);
+  }, [session, onSessionExpired]);
+
+  useEffect(() => {
+    if (!outboxKey) { setPendingScans([]); return; }
+    try { setPendingScans(JSON.parse(localStorage.getItem(outboxKey) || "[]") as MpsScan[]); }
+    catch { setPendingScans([]); }
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ key: string; scans: MpsScan[] }>).detail;
+      if (detail?.key === outboxKey) setPendingScans(detail.scans);
+    };
+    window.addEventListener("mps-outbox-change", update);
+    return () => window.removeEventListener("mps-outbox-change", update);
+  }, [outboxKey]);
+
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
     window.addEventListener("online", update);
@@ -67,629 +91,178 @@ export default function App() {
       if (sourceRef.current) closeDocument(sourceRef.current);
     };
   }, []);
-  useEffect(() => {
-    if (!source?.pdf || !preview.current) return;
-    let active = true;
-    const canvas = document.createElement("canvas");
-    preview.current.replaceChildren(canvas);
-    void renderPage(source, page, canvas).catch(() => {
-      if (active)
-        setError("Could not display this PDF page. Try another document.");
-    });
-    return () => {
-      active = false;
-    };
-  }, [source, page, mode]);
-  const errors = validateFields(fields);
-  const payload =
-    meta && !errors.length ? buildPayload(meta, fields, unmatched, raw) : null;
-  const json = payload
-    ? JSON.stringify(payload, null, 2)
-    : JSON.stringify({ validationErrors: errors }, null, 2);
-  async function select(file?: File) {
+
+  async function loadSheet(file?: File) {
     if (!file || lock.current) return;
     lock.current = true;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    setStatus("Opening document…");
+    setBusy(true); setError(""); setNotice("");
     try {
       validateFile(file);
       const next = await openDocument(file);
       if (sourceRef.current) closeDocument(sourceRef.current);
       sourceRef.current = next;
-      setSource(next);
-      setMeta({
-        fileName: file.name,
-        fileType: next.pdf
-          ? "application/pdf"
-          : file.type || `image/${file.name.split(".").pop()}`,
-        pageCount: next.pageCount,
-        capturedAt: new Date().toISOString(),
-      });
-      setPage(1);
-      setScanned(false);
-      setFields([]);
-      setUnmatched([]);
-      setRaw("");
-      setApiState("idle");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
+      setSource(next); setFields([]); setScanned(false);
+    } catch (e) { setError((e as Error).message); }
+    finally { lock.current = false; setBusy(false); }
   }
-  function remove() {
+
+  function removeSheet() {
     if (lock.current) return;
     if (sourceRef.current) closeDocument(sourceRef.current);
     sourceRef.current = null;
-    setSource(null);
-    setMeta(null);
-    setScanned(false);
-    setFields([]);
-    setRaw("");
-    setUnmatched([]);
-    setError("");
-    setNotice("");
-    setApiState("idle");
+    setSource(null); setFields([]); setScanned(false); setError(""); setNotice("");
   }
-  async function scan() {
-    if (!source || lock.current) return;
-    lock.current = true;
-    setBusy(true);
-    setError("");
-    setProgress(0);
-    try {
-      const lines = await localOcr.extract(source, (p, s) => {
-        setProgress(p);
-        setStatus(s);
-      });
-      const result = parseLines(lines);
-      setFields(result.fields);
-      setUnmatched(result.unmatchedText);
-      setRaw(lines.map((l) => l.text).join("\n"));
-      setScanned(true);
-      setTab("fields");
-      setApiState("idle");
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      lock.current = false;
-      setBusy(false);
+
+  function editField(index: number, value: string) {
+    setFields((old) => old.map((field, i) => i === index
+      ? { ...field, value, status: field.status ? "reviewed" : field.status, confidence: 1 }
+      : field));
+  }
+
+  const fieldIndex = (key: string) => fields.findIndex((field) => field.key === key);
+  const reviewField = (key: string) => fields.find((field) => field.key === key);
+  const answerChoices = ["A", "B", "C", "D"] as const;
+  const subjectNames = ["Araling Panlipunan", "Math", "English", "Science", "Filipino"];
+
+  async function signOut() {
+    const current = session;
+    localStorage.removeItem("mps-scanner-session");
+    setSession(null);
+    if (current) try { await logoutMps(current.baseUrl, current.token); } catch { /* local access is cleared when offline */ }
+  }
+
+  async function syncPending() {
+    if (!session || !navigator.onLine || syncBusy || !pendingScans.length) return;
+    setSyncBusy(true); setNotice("");
+    const remaining = [...pendingScans];
+    while (remaining.length) {
+      try { await submitMpsScan(session.baseUrl, session.token, remaining[0]); remaining.shift(); }
+      catch (e) {
+        if ((e as { status?: number }).status === 401) onSessionExpired();
+        setNotice(`Sync paused. ${remaining.length} scan${remaining.length === 1 ? " remains" : "s remain"} on this device: ${(e as Error).message}`);
+        break;
+      }
     }
+    localStorage.setItem(outboxKey, JSON.stringify(remaining));
+    window.dispatchEvent(new CustomEvent("mps-outbox-change", { detail: { key: outboxKey, scans: remaining } }));
+    if (!remaining.length) setNotice("All queued scans synced to MPS.");
+    setSyncBusy(false);
   }
-  function edit(index: number, change: Partial<Field>) {
-    setFields((old) =>
-      old.map((f, i) =>
-        i === index
-          ? {
-              ...f,
-              ...change,
-              ...(f.status && change.value !== undefined
-                ? { status: "reviewed" as const, confidence: 1 }
-                : {}),
-            }
-          : f,
-      ),
-    );
-    setApiState("idle");
-    setNotice("");
-  }
-  async function submit() {
-    if (!payload || lock.current) return;
-    lock.current = true;
-    setApiState("loading");
-    try {
-      await documentApi.submitScannedDocument(payload);
-      setApiState("success");
-    } catch {
-      setApiState("error");
-    } finally {
-      lock.current = false;
-    }
-  }
-  return (
-    <>
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="MPS Scanner home">
-          <span className="brand-icon">
-            <ScanLine size={23} />
-          </span>
-          MPS Scanner
-        </a>
-        <div className="header-right">
-          <InstallButton />
-        </div>
-      </header>
-      <main>
-        <label className="scan-mode">
-          Document type
-          <select
-            value={mode}
-            disabled={busy || apiState === "loading"}
-            onChange={(e) => {
-              setMode(e.target.value as "document" | "answerSheet");
-              setScanned(false);
-              setFields([]);
-              setUnmatched([]);
-              setRaw("");
-              setApiState("idle");
-            }}
-          >
-            <option value="document">Document / text</option>
-            <option value="answerSheet">50-question answer sheet (A–D)</option>
-          </select>
-        </label>
-        <div className="intro">
-          <div>
-            <h1>Scan a document</h1>
+
+  if (!session) return <>
+    <header className="topbar"><a className="brand" href="./">MPS Scanner</a><InstallButton /></header>
+    <ScannerSignIn suggestedUrl={mpsUrlConfig.url} onSignedIn={(value) => {
+      localStorage.setItem("mps-scanner-session", JSON.stringify(value));
+      setSession(value);
+    }} />
+  </>;
+
+  return <>
+    <header className="topbar">
+      <a className="brand" href="./" aria-label="MPS Scanner home"><span className="brand-icon"><ScanLine size={23} /></span>MPS Scanner</a>
+      <div className="header-right">
+        <span className="scanner-teacher">{session.teacherDisplay}</span>
+        <strong className="pending-count">{pendingScans.length} not synced</strong>
+        <button className="text-button" onClick={() => void syncPending()} disabled={!pendingScans.length || !online || syncBusy}>{syncBusy ? "Syncing…" : "Sync now"}</button>
+        <button className="text-button" onClick={() => void signOut()}>Sign out</button>
+        <InstallButton />
+      </div>
+    </header>
+    <main>
+      <div className="intro"><div><h1>Scan student answer sheets</h1></div></div>
+      <nav className="steps" aria-label="Scanning workflow">
+        {["Scan", "Review and Submit"].map((label, index) => (
+          <div key={label} className={(scanned ? 1 : 0) === index ? "active" : (scanned ? 1 : 0) > index ? "complete" : ""}>
+            <span>{scanned && index === 0 ? <Check size={14} /> : index + 1}</span>{label}{index === 0 && <ChevronRight size={15} />}
           </div>
-        </div>
-        <nav className="steps" aria-label="Scanning workflow">
-          {["Add document", "Scan & extract", "Review & export"].map(
-            (label, i) => (
-              <div
-                key={label}
-                className={
-                  (scanned ? 2 : source ? 1 : 0) === i
-                    ? "active"
-                    : (scanned ? 2 : source ? 1 : 0) > i
-                      ? "complete"
-                      : ""
-                }
-              >
-                <span>
-                  {(scanned ? 2 : source ? 1 : 0) > i ? (
-                    <Check size={14} />
-                  ) : (
-                    i + 1
-                  )}
-                </span>
-                {label}
-                {i < 2 && <ChevronRight size={15} />}
-              </div>
-            ),
-          )}
-        </nav>
-        {busy && !source && (
-          <div className="banner" role="status">
-            {status}
-          </div>
-        )}
-        {!online && (
-          <div className="banner">
-            <WifiOff size={17} /> You’re offline. Scanning works if the app’s
-            OCR resources have finished caching.
-          </div>
-        )}
-        {error && (
-          <div className="error" role="alert">
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="banner" role="status">
-            {notice}
-          </div>
-        )}
-        <div className="workspace">
-          <section className="panel document-panel">
-            <div className="panel-heading">
-              <div>
-                <h2>{source ? "Preview document" : "Add a document"}</h2>
-              </div>
+        ))}
+      </nav>
+      {!online && <div className="banner"><WifiOff size={17} /> You’re offline. Scanning works with cached assessments; queued scans sync when you reconnect.</div>}
+      {error && <div className="error" role="alert">{error}</div>}
+      {notice && <div className="banner" role="status">{notice}</div>}
+      <div className={`workspace ${scanned ? "reviewing" : ""}`}>
+        <section className="panel document-panel">
+          <div className="panel-heading"><div><h2>{source ? "Scan answer sheet" : "Add an answer sheet"}</h2></div></div>
+          {!source ? <div className={`dropzone ${drag ? "dragging" : ""}`}
+            onDragOver={(event) => { event.preventDefault(); setDrag(true); }}
+            onDragLeave={() => setDrag(false)}
+            onDrop={(event) => { event.preventDefault(); setDrag(false); if (event.dataTransfer.files.length > 1) setError("Choose one answer sheet at a time."); else void loadSheet(event.dataTransfer.files[0]); }}>
+            <div className="upload-art"><FileText size={36} /><span><ScanLine size={16} /></span></div>
+            <p>Choose or drop a photo or PDF of the four-subject answer sheet.</p>
+            <button className="primary" disabled={busy} onClick={() => input.current?.click()}><Upload size={17} /> Choose answer sheet</button>
+            <span className="file-hint">PDF, JPG, PNG, WEBP · Up to {maxFileMb} MB</span>
+            <div className="or"><span />or<span /></div>
+            <button className="camera-button" disabled={busy} onClick={() => setCamera(true)}><Camera size={18} /> Use your camera</button>
+          </div> : <>
+            <div className="file-info"><FileText size={24} /><div><strong>{source.file.name}</strong><small>{(source.file.size / 1024 / 1024).toFixed(2)} MB · {source.pageCount} {source.pageCount === 1 ? "page" : "pages"}</small></div>
+              <button aria-label="Remove answer sheet" disabled={busy} onClick={removeSheet}><Trash2 size={17} /></button>
             </div>
-            {!source ? (
-              <>
-                <div
-                  className={`dropzone ${drag ? "dragging" : ""}`}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDrag(true);
-                  }}
-                  onDragLeave={() => setDrag(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDrag(false);
-                    if (e.dataTransfer.files.length > 1)
-                      setError("Please choose one document at a time.");
-                    else void select(e.dataTransfer.files[0]);
-                  }}
-                >
-                  <div className="upload-art">
-                    <FileText size={36} />
-                    <span>
-                      <Plus size={16} />
-                    </span>
-                  </div>
-                  <p>Drop a file here or choose one below.</p>
-                  <button
-                    className="primary"
-                    disabled={busy}
-                    onClick={() => input.current?.click()}
-                  >
-                    <Upload size={17} /> Choose a document
-                  </button>
-                  <span className="file-hint">
-                    PDF, JPG, PNG, WEBP · Up to {maxFileMb} MB
-                  </span>
-                  <div className="or">
-                    <span />
-                    or
-                    <span />
-                  </div>
-                  <button
-                    className="camera-button"
-                    disabled={busy}
-                    onClick={() => setCamera(true)}
-                  >
-                    <Camera size={18} /> Use your camera
-                  </button>
-                </div>
-                <div className="tip">
-                  <Sparkles size={18} />
-                  <div>
-                    <p>
-                      Use good lighting and keep the entire document in view.
-                    </p>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="file-info">
-                  <FileText size={24} />
-                  <div>
-                    <strong>{source.file.name}</strong>
-                    <small>
-                      {meta?.fileType} ·{" "}
-                      {(source.file.size / 1024 / 1024).toFixed(2)} MB ·{" "}
-                      {source.pageCount}{" "}
-                      {source.pageCount === 1 ? "page" : "pages"}
-                    </small>
-                  </div>
-                  <button
-                    aria-label="Remove document"
-                    disabled={busy || apiState === "loading"}
-                    onClick={remove}
-                  >
-                    <Trash2 size={17} />
-                  </button>
-                </div>
-                {mode === "answerSheet" ? (
-                  <AnswerSheetScanner
-                    key={source.url}
-                    source={source}
-                    onResult={(result) => {
-                      setFields(result);
-                      setUnmatched([]);
-                      setRaw("");
-                      setScanned(true);
-                      setTab("fields");
-                      setApiState("idle");
-                    }}
-                  />
-                ) : (
-                  <>
-                    <div
-                      className="preview"
-                      ref={source.pdf ? preview : undefined}
-                    >
-                      {!source.pdf && (
-                        <img src={source.url} alt="Selected document preview" />
-                      )}
-                    </div>
-                    <div className="page-controls">
-                      <button
-                        aria-label="Previous page"
-                        disabled={page === 1 || busy}
-                        onClick={() => setPage((p) => p - 1)}
-                      >
-                        <ChevronLeft size={17} />
-                      </button>
-                      <span>
-                        Page {page} of {source.pageCount}
-                      </span>
-                      <button
-                        aria-label="Next page"
-                        disabled={page === source.pageCount || busy}
-                        onClick={() => setPage((p) => p + 1)}
-                      >
-                        <ChevronRight size={17} />
-                      </button>
-                    </div>
-                    <div className="scan-action">
-                      <button
-                        className="primary"
-                        disabled={busy || apiState === "loading"}
-                        onClick={scan}
-                      >
-                        <ScanLine size={18} />
-                        {busy
-                          ? "Processing…"
-                          : scanned
-                            ? "Scan again"
-                            : "Scan & extract"}
-                        <ArrowRight size={17} />
-                      </button>
-                      {busy && (
-                        <div role="status">
-                          <progress value={progress} max={100} />
-                          <small>{status}</small>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-            <input
-              ref={input}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-              hidden
-              onChange={(e) => {
-                void select(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-          </section>
-          <section className="panel results-panel">
-            <div className="panel-heading">
-              <div>
-                <h2>Review & export</h2>
-              </div>
+            <AnswerSheetScanner key={source.url} source={source} apiBaseUrl={session.baseUrl} authToken={session.token} teacherId={session.teacherId} teacherDisplay={session.teacherDisplay} onSessionExpired={onSessionExpired} reviewFields={fields} onResult={(nextFields) => { setFields(nextFields); setScanned(nextFields.length > 0); }} />
+          </>}
+          <input ref={input} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" hidden onChange={(event) => { void loadSheet(event.target.files?.[0]); event.target.value = ""; }} />
+        </section>
+        <section className="panel results-panel">
+          <div className="panel-heading"><div><h2>Review and Submit</h2></div></div>
+          {!scanned ? <div className="results-empty"><div className="result-illustration"><div><span /><i /></div><div><span /><i /></div><div><span /><i /></div><span className="check-bubble"><Check size={20} /></span></div><p>{source ? "Read the sheet to review detected answers and barcodes." : "Add an answer sheet, then scan it to begin review."}</p></div> : <div className="result-content">
+            <div className="review-note">Review the IDs and answers against the sheet. For unclear or multiple marks, select the correct answer below. Leave a question unselected to submit it blank.</div>
+            <div className="review-identifiers">
+              {["studentId", "sectionId", "assessmentId"].map((key) => {
+                const index = fieldIndex(key);
+                const field = reviewField(key);
+                if (index < 0 || !field) return null;
+                return <label className="review-id-card" key={key}>
+                  <strong>{field.label}</strong>
+                  <input value={field.value} onChange={(event) => editField(index, event.target.value)} />
+                  {field.status === "unreviewed" && <small>Barcode not read · enter manually</small>}
+                </label>;
+              })}
             </div>
-            <div className="tabs" role="tablist" aria-label="Results view">
-              <button
-                role="tab"
-                aria-selected={tab === "fields"}
-                className={tab === "fields" ? "selected" : ""}
-                onClick={() => setTab("fields")}
-              >
-                <Layers size={16} /> Extracted fields
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === "json"}
-                className={tab === "json" ? "selected" : ""}
-                onClick={() => setTab("json")}
-              >
-                <Code2 size={17} /> JSON preview
-              </button>
-            </div>
-            {!scanned ? (
-              <div className="results-empty">
-                <div className="result-illustration">
-                  <div>
-                    <span />
-                    <i />
-                  </div>
-                  <div>
-                    <span />
-                    <i />
-                  </div>
-                  <div>
-                    <span />
-                    <i />
-                  </div>
-                  <span className="check-bubble">
-                    <Check size={20} />
-                  </span>
-                </div>
-                <p>
-                  {source
-                    ? mode === "answerSheet"
-                      ? "Check the alignment, then select Read answer sheet."
-                      : "Select Scan & extract to review the fields."
-                    : "Add a document to get started."}
-                </p>
-              </div>
-            ) : (
-              <div className="result-content">
-                {errors.length > 0 && (
-                  <div className="error" role="alert">
-                    {errors.map((e, i) => (
-                      <p key={i}>{e}</p>
-                    ))}
-                  </div>
-                )}
-                {tab === "fields" ? (
-                  <>
-                    <div className="review-note">
-                      Check the values before exporting, especially amber
-                      fields.
-                    </div>
-                    <div className="field-list">
-                      {fields.map((f, i) => (
-                        <div
-                          className={`field-card ${f.confidence < 0.8 ? "uncertain" : ""}`}
-                          key={i}
-                        >
-                          <div className="field-meta">
-                            <span>
-                              {f.status && (
-                                <strong>
-                                  {f.status === "multiple"
-                                    ? "Multiple marks · check"
-                                    : f.status === "uncertain"
-                                      ? "Faint mark · check"
-                                      : f.status === "blank"
-                                        ? "Blank · check"
-                                        : f.status === "unreviewed"
-                                          ? "Enter value"
-                                          : f.status}{" "}
-                                  ·{" "}
-                                </strong>
-                              )}
-                              FIELD {String(i + 1).padStart(2, "0")} · PAGE{" "}
-                              {f.page}
-                            </span>
-                            <span>
-                              {Math.round(f.confidence * 100)}% confidence{" "}
-                              <button
-                                disabled={apiState === "loading"}
-                                aria-label={`Delete field ${i + 1}`}
-                                onClick={() => {
-                                  setFields((old) =>
-                                    old.filter((_, n) => n !== i),
-                                  );
-                                  setApiState("idle");
-                                }}
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </span>
+            <div className="answer-review-scroll">
+              <div className="answer-review">
+                {subjectNames.map((subjectName, column) => {
+                  const subjectIdKey = `subject${column + 1}Id`;
+                  const barcodeStudentKey = `subject${column + 1}StudentId`;
+                  const subjectIdIndex = fieldIndex(subjectIdKey);
+                  const barcodeStudentIndex = fieldIndex(barcodeStudentKey);
+                  const subjectId = reviewField(subjectIdKey);
+                  const barcodeStudent = reviewField(barcodeStudentKey);
+                  return <section className="review-subject" key={column}>
+                    <header className="review-subject-heading">
+                      <h3>{subjectName}</h3>
+                      <label>Subject ID
+                        <input value={subjectId?.value ?? ""} onChange={(event) => subjectIdIndex >= 0 && editField(subjectIdIndex, event.target.value)} />
+                      </label>
+                      <label>Barcode Student ID
+                        <input value={barcodeStudent?.value ?? ""} onChange={(event) => barcodeStudentIndex >= 0 && editField(barcodeStudentIndex, event.target.value)} />
+                      </label>
+                      {(!subjectId?.value || !barcodeStudent?.value) && <small>Barcode value missing · enter manually</small>}
+                    </header>
+                    <div className="review-question-list">
+                      {Array.from({ length: 50 }, (_, question) => {
+                        const key = `subject${column + 1}Question${question + 1}`;
+                        const index = fieldIndex(key);
+                        const field = reviewField(key);
+                        const flagged = field?.status === "multiple" || field?.status === "uncertain";
+                        return <div className={`review-question ${flagged ? "needs-review" : ""}`} key={key}>
+                          <span className="review-question-number">{String(question + 1).padStart(2, "0")}</span>
+                          <div className="review-radio-group" role="radiogroup" aria-label={`${subjectName}, question ${question + 1}`}>
+                            {answerChoices.map((choice) => <label className="review-radio-option" key={choice}>
+                              <input type="radio" name={key} value={choice} checked={field?.value === choice} disabled={index < 0}
+                                onChange={() => index >= 0 && editField(index, choice)} />
+                              <span>{choice}</span>
+                            </label>)}
                           </div>
-                          <div className="field-pair">
-                            <label>
-                              Label
-                              <input
-                                disabled={apiState === "loading"}
-                                value={f.label}
-                                onChange={(e) =>
-                                  edit(i, { label: e.target.value })
-                                }
-                              />
-                            </label>
-                            <label>
-                              JSON key
-                              <input
-                                disabled={apiState === "loading"}
-                                value={f.key}
-                                onChange={(e) =>
-                                  edit(i, { key: e.target.value })
-                                }
-                                aria-invalid={
-                                  !f.key.trim() ||
-                                  fields.filter((x) => x.key === f.key).length >
-                                    1
-                                }
-                              />
-                            </label>
-                          </div>
-                          <label>
-                            Value
-                            <textarea
-                              disabled={apiState === "loading"}
-                              rows={1}
-                              value={f.value}
-                              onChange={(e) =>
-                                edit(i, { value: e.target.value })
-                              }
-                            />
-                          </label>
-                        </div>
-                      ))}
+                        </div>;
+                      })}
                     </div>
-                    <button
-                      className="add-field"
-                      disabled={apiState === "loading"}
-                      onClick={() => {
-                        setFields((old) => [
-                          ...old,
-                          {
-                            key: "",
-                            label: "",
-                            value: "",
-                            confidence: 1,
-                            page,
-                          },
-                        ]);
-                        setApiState("idle");
-                      }}
-                    >
-                      <Plus size={16} /> Add a field
-                    </button>
-                    <details>
-                      <summary>Unmatched text ({unmatched.length})</summary>
-                      {unmatched.map((l, i) => (
-                        <p key={i}>
-                          <small>Page {l.page}</small> {l.text}
-                        </p>
-                      ))}
-                    </details>
-                    <details>
-                      <summary>Full extracted text</summary>
-                      <pre>{raw}</pre>
-                    </details>
-                  </>
-                ) : (
-                  <>
-                    <p className="review-note">
-                      {errors.length
-                        ? "Resolve key errors to generate the final payload."
-                        : "Copy or export the JSON below."}
-                    </p>
-                    <pre className="json-view">{json}</pre>
-                  </>
-                )}
-              </div>
-            )}
-            <div className="export-bar">
-              <div>
-                <button
-                  aria-label="Copy JSON"
-                  disabled={!scanned || !!errors.length}
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(json);
-                      setNotice("JSON copied to clipboard.");
-                    } catch {
-                      setError(
-                        "Clipboard access was denied. Download the JSON instead.",
-                      );
-                    }
-                  }}
-                >
-                  <Copy size={16} /> Copy
-                </button>
-                <button
-                  disabled={!scanned || !!errors.length}
-                  onClick={() => downloadJson(json, source!.file.name)}
-                >
-                  <Download size={16} /> Export JSON
-                </button>
+                  </section>;
+                })}
               </div>
             </div>
-            {scanned && (
-              <div className="api-bar">
-                <button
-                  disabled={
-                    !mockMode || !!errors.length || apiState === "loading"
-                  }
-                  onClick={submit}
-                >
-                  {apiState === "loading"
-                    ? "Simulating…"
-                    : apiState === "error"
-                      ? "Retry mock submission"
-                      : "Submit to API · mock"}
-                </button>
-                {apiState !== "idle" && (
-                  <small role="status">
-                    {apiState === "success"
-                      ? "Mock submission accepted. No data left your device."
-                      : apiState === "error"
-                        ? "Mock submission failed. Please retry."
-                        : ""}
-                  </small>
-                )}
-              </div>
-            )}
-          </section>
-        </div>
-      </main>
-      {camera && (
-        <CameraCapture
-          onClose={() => setCamera(false)}
-          onCapture={(file) => {
-            setCamera(false);
-            void select(file);
-          }}
-        />
-      )}
-    </>
-  );
+          </div>}
+        </section>
+      </div>
+    </main>
+    {camera && <CameraCapture onClose={() => setCamera(false)} onCapture={(file) => { setCamera(false); void loadSheet(file); }} />}
+  </>;
 }

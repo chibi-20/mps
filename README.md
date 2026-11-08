@@ -13,15 +13,29 @@ Schools Division of Biñan City · Region IV-A CALABARZON
 
 ---
 
-## Quick Start (XAMPP / Local)
+## Quick Start (SQLite, no XAMPP)
+
+PHP 8.0+ with `pdo_sqlite` enabled is enough for local testing. From the project folder:
+
+```powershell
+$env:MPS_DB_DRIVER = 'sqlite'
+php bin/migrate.php migrate
+php setup.php
+php -S 127.0.0.1:8000
+```
+
+Open `http://127.0.0.1:8000`. The SQLite database is created at `data/mps.sqlite` automatically and is ignored by Git. `setup.php` seeds the demo accounts and sample data; use it only for a fresh local database. To keep using the same database in later sessions, set `MPS_DB_DRIVER=sqlite` again before starting PHP. `MPS_SQLITE_PATH` can point to a different SQLite file.
+
+For MySQL/XAMPP, use the setup below; MySQL remains the default database driver.
 
 ### 1. Place files
 Copy the entire `mps/` folder to `C:\xampp\htdocs\mps\`.
 
-### 2. Create the database
+### 2. Create and migrate the database
 1. Start XAMPP (Apache + MySQL).
 2. Open **phpMyAdmin** → New database → name it `mps_db` → Collation: `utf8mb4_unicode_ci`.
-3. Select `mps_db` → Import → choose `schema.sql` → Go.
+3. Set the credentials in `includes/config.php`.
+4. From the project folder, run `php bin\migrate.php migrate` (use your XAMPP PHP executable if `php` is not on PATH).
 
 ### 3. Seed initial data
 Browse to:
@@ -36,7 +50,7 @@ This inserts:
 - Teacher assignments (AP Grade 10, 7 sections)
 - Sample periodic assessment with realistic MPS and item analysis data
 
-**Delete `setup.php` after running it.** It will refuse to run a second time if the admin already exists.
+**Delete `setup.php` after running it.** It will refuse to run a second time if the admin already exists. The demo accounts use sample passwords; change them before using a real deployment.
 
 ### 4. Access the system
 ```
@@ -50,25 +64,23 @@ http://localhost/mps/
 ### 1. PHP version
 Ensure your host runs **PHP 8.0 or later**. Check via cPanel → PHP Selector.
 
-### 2. Database
-1. cPanel → MySQL Databases → create a new database and user.
-2. Grant ALL PRIVILEGES to the user on that database.
-3. phpMyAdmin → import `schema.sql`.
-4. Visit `https://yourdomain.com/mps/setup.php` to seed data, then **delete it**.
+### 2. Upload files
+Upload the project files to the hosting account. Excel export uses the dependency-free `includes/MiniXlsx.php` writer — no `vendor/` directory or Composer step needed.
 
-### 3. Update credentials
-Edit `includes/config.php`:
+### 3. Database
+1. cPanel → MySQL Databases → create a new database and user.
+2. Grant the database user the privileges needed to create and alter tables.
+3. Edit `includes/config.php`:
 ```php
 define('DB_HOST', 'localhost');      // usually localhost
 define('DB_NAME', 'cpanel_mps_db'); // your DB name (with cPanel prefix)
 define('DB_USER', 'cpanel_user');   // your DB username
 define('DB_PASS', 'yourpassword');  // your DB password
 ```
+4. Run `php bin/migrate.php migrate` from the project folder using SSH/cPanel Terminal.
+5. For a new demo installation only, visit `https://yourdomain.com/mps/setup.php` to seed sample data, then **delete it**. Existing installs should not run the demo seeder.
 
-### 4. Upload files
-Upload all files as-is. Excel export uses the dependency-free `includes/MiniXlsx.php` writer — no `vendor/` directory or Composer step needed.
-
-### 5. Update base path (if not in root)
+### 4. Update base path (if not in root)
 If the app is NOT at the root of your domain (e.g., it's at `yourdomain.com/mps/`), the current `Location:` headers (`/mps/...`) already account for this. If your folder name differs, do a project-wide search-and-replace on `/mps/` with your actual path.
 
 ---
@@ -91,11 +103,14 @@ mps/
 ├── admin-dashboard.php     Admin: analytics, submissions, teacher accounts
 ├── styles.css              All CSS
 ├── script.js               Chart.js rendering + live table computation
-├── schema.sql              MySQL DDL (tables + indexes)
-├── setup.php               One-time seed script (delete after use!)
+├── schema.sql              Initial schema for an empty database
+├── bin/migrate.php         CLI migration commands
+├── migrations/             Ordered schema migrations
+├── setup.php               One-time demo seed script (delete after use!)
 ├── includes/
 │   ├── config.php          DB credentials + school constants + mastery bands
 │   ├── db.php              PDO singleton
+│   ├── MigrationRunner.php Database migration runner
 │   ├── auth.php            Session helpers, CSRF, role guards
 │   ├── functions.php       PHP compute helpers (MPS, bands, display_name)
 │   └── MiniXlsx.php        Dependency-free .xlsx writer (used by every Excel export)
@@ -114,6 +129,12 @@ mps/
 ```
 
 ---
+
+## Database Migrations
+
+Use `php bin/migrate.php status` to see migration state and `php bin/migrate.php migrate` to apply pending migrations. For an existing installation created before the migrator, make a database backup and run `php bin/migrate.php baseline` once; this records the current schema without replaying or changing it. See [`migrations/README.md`](migrations/README.md) for adding migrations and adoption details.
+
+`schema.sql` is only for initializing a new empty database. It no longer drops tables, and the migrator refuses to run the initial migration if it detects an existing MPS schema without migration history.
 
 ## Mastery Bands & NPWRM Threshold
 All thresholds live in `includes/config.php` under `MASTERY_BANDS` and `MASTERY_THRESHOLD` (default 75%). Edit there; the server-side PHP and the JS data attributes both read from config.php at render time so they stay in sync.
@@ -236,6 +257,8 @@ Development runs at http://localhost:5173. Production preview runs at http://loc
 
 ## Architecture
 
+See [docs/system-flow.md](docs/system-flow.md) for an end-to-end flow chart of assessment setup, teacher result entry, scanner and ZipGrade imports, admin review, and analytics.
+
 - `src/App.tsx`: workflow and review UI; `src/components/`: camera and installation controls.
 - `src/services/ocr.ts`: replaceable `OcrService`, PDF text extraction, PDF canvas rendering, local OCR.
 - `src/services/parser.ts`: label/value heuristics and key validation.
@@ -256,16 +279,35 @@ This is a heuristic printed-English extractor, not a general semantic model. Han
 
 ## PWA and camera testing
 
-Deploy `dist/` at the root of an HTTPS origin. The service worker is generated only for production. The initial static cache is about 41 MB because English OCR resources are bundled. Open the production app online and let service worker installation complete before testing airplane mode. Verify DevTools → Application → Manifest / Service Workers / Cache Storage. Reload offline and test both image OCR and PDFs.
+Run `npm run build`; the production PWA is emitted into the `scanner/` folder. Serve that folder as `/scanner/` from the MPS webroot (or `/mps/scanner/` when MPS is mounted at `/mps/`). Set `MPS_SCANNER_PWA_URL` if it is hosted at another URL. The Vite base and manifest scope are relative to this folder. Deploy it over HTTPS. The service worker is generated only for production. The initial static cache is about 41 MB because English OCR resources are bundled. Open the production app online and let service worker installation complete before testing airplane mode. Verify DevTools → Application → Manifest / Service Workers / Cache Storage. Reload offline and test both image OCR and PDFs.
 
-Chrome/Edge desktop and Android: use **Install app** when the browser makes installation available, or the browser's install menu. iPhone/iPad: Safari → Share → Add to Home Screen → Add. The app provides these instructions when no native install prompt exists. Manifest icons, standalone display, background and theme colors provide the installed app identity; splash appearance is generated by the operating system.
+Chrome/Edge desktop and Android: open the PWA URL and use **Install app** when the browser makes installation available, or the browser's install menu. The teacher dashboard link opens this PWA with the MPS URL configured; installation is confirmed by the browser. iPhone/iPad: Safari → Share → Add to Home Screen → Add. The app provides these instructions when no native install prompt exists. Manifest icons, standalone display, background and theme colors provide the installed app identity; splash appearance is generated by the operating system.
 
 Camera permission is requested only after **Use your camera**. Test Allow and Deny, switch away/close the dialog, and confirm the camera indicator turns off. Camera requires HTTPS or localhost. An HTTP LAN address is not a secure context; use an HTTPS development tunnel or HTTPS hosting when testing a physical phone. Test desktop, Android and iOS standalone modes on physical devices before release; headless browser checks do not establish device-specific install or camera behavior.
 
-## Future API
+## Scanner API and sign-in
 
-`VITE_API_MODE=mock` (default) simulates acceptance without a network call. `VITE_API_MODE=disabled` disables submission. `VITE_API_BASE_URL` is reserved for a future provider and is not used to contact a server. Implement `DocumentApi.submitScannedDocument(payload: Payload): Promise<SubmitResponse>` and replace `documentApi` when ready. Add authentication server-side as appropriate; never put secrets in Vite variables. Keep `buildPayload` as the single payload source so preview, download, and submission remain identical.
+Migrations `0002_scanner_submissions`, `0003_assessment_section_ingestion_mode`, and `0004_scanner_signin_audit` add scanner submissions, answer keys, short-lived teacher sessions, and the scan audit log. Apply them with `php bin/migrate.php migrate` (or baseline an existing install first, as described in `migrations/README.md`). The API preserves the existing ZipGrade CSV import and recomputes score and item aggregates from stored student answers.
 
+### Sign-in and setup
+
+Teachers open **Install MPS Scanner** from their MPS dashboard. This link opens the installable PWA; the browser presents its installation confirmation. The link passes the MPS base URL to the PWA; the PWA never receives a token in its URL. Teachers sign in with their MPS username and password. MPS issues a random eight-hour bearer session, stores only its SHA-256 hash, ties it to the teacher, and revokes it on sign-out. The PWA keeps that session on-device to resume offline use; do not use a shared device account. `POST /api/scanner_login.php` is the PWA sign-in endpoint and `POST /api/scanner_logout.php` revokes the current session.
+
+Save each assessment answer key while logged into MPS using `PUT /api/scanner_answer_key.php` with the CSRF header and JSON `{ "assessment_id": 123, "answer_key": ["A", "B", "C", "D"] }`. The array must have exactly `total_items` choices. `GET` with `?assessment_id=123` reads it back. Use the scanner setup and audit pages to maintain answer keys and review submissions and rejected attempts; teachers see their own activity and administrators see all teachers. The log stores a timestamp, actor, request context, answer payload, and payload SHA-256 digest.
+
+Set `MPS_SCANNER_PWA_URL` to the deployed PWA URL if it is not served at the default `/mps/scanner/`. Configure `MPS_SCANNER_CORS_ORIGINS` as a comma-separated list of exact trusted origins if the scanner runs on a different origin (for example, `http://localhost:5173`). Same-origin deployments need no CORS configuration. Never use `*` with bearer tokens.
+
+### Scanner endpoints
+
+- `POST /api/scanner_login.php` accepts `{ "username": "…", "password": "…" }` and returns a teacher-scoped expiring token, API base URL, and teacher display name. Login attempts are audited and rate limited by IP.
+- `GET /api/scanner_assessments.php` with `Authorization: Bearer mps_…` returns assessments and linked sections the teacher can encode, including whether each answer key is complete.
+- `POST /api/scanner_submit.php` records one student's answers. The PWA sends `submission_id` (UUID), `assessment_id`, `section_id`, opaque `student_id`, and `answers` as an ordered array of A–D choices or `null` for blank. Example: `{ "submission_id": "550e8400-e29b-41d4-a716-446655440000", "assessment_id": 123, "section_id": 9, "student_id": "00042", "answers": ["A", "C", null] }`.
+
+MPS calculates scores from its stored key; the client cannot submit its own score or correctness flags. Repeating the same UUID is idempotent. A new scan for the same student, assessment, and section replaces the earlier scan and recomputes aggregates. Assessment and encoding locks still apply. Student IDs remain strings to preserve leading zeroes; MPS currently has no roster table, so the API validates assessment-section access but cannot confirm roster membership.
+
+The Scanner PWA reads the four-subject sheet, decodes the combined assessment/student barcode and subject barcodes, and supports manual review. The single header barcode contains `assessmentId_studentId`; each subject box contains `subjectId_studentId_sectionId`. The assessment ID preselects its assessment in the matching subject box. Add and order one or more assessments in each subject box; their item ranges follow that order and must fit within 50 questions. Each assessment needs a complete key. MPS receives each assessment slice separately. If the device is offline or the API is temporarily unavailable, the PWA keeps submissions in an on-device outbox, shows the number pending, and lets the teacher use **Sync now** when connectivity returns. Synced accepted, duplicate, and rejected attempts are recorded in the audit trail. The older generic document workflow remains mock-only.
+
+For local Vite development, allow the Vite origin in `MPS_SCANNER_CORS_ORIGINS` (normally `http://localhost:5173`). `VITE_API_BASE_URL` can prefill the MPS base URL; it is not a secret. Never put scanner tokens in Vite environment variables.
 ## Validation
 
 `npm test` covers parser formats, confidence, page boundaries, unmatched text, normalization, duplicate and invalid keys, payload integrity, special property names and file validation.

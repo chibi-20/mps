@@ -126,8 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $secChkSt->execute([...$form['section_ids'], $regSyId, ...$validGrades]);
 
                     $taStmt = $pdo->prepare(
-                        "INSERT IGNORE INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id)
-                         VALUES (?,?,?,?)"
+                        is_sqlite()
+                            ? "INSERT OR IGNORE INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id) VALUES (?,?,?,?)"
+                            : "INSERT IGNORE INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id) VALUES (?,?,?,?)"
                     );
                     foreach ($secChkSt->fetchAll() as $sec) {
                         foreach ($subsByGrade[(int)$sec['grade_level']] ?? [] as $subjId) {
@@ -149,28 +150,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $csrf = csrf_token();
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MPS System – Teacher Registration</title>
-<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
-</head>
-<body class="auth-page">
-<div class="login-split">
-
-    <div class="login-brand">
-        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
-        <p class="login-brand-name">Jacobo Z. Gonzales Memorial National High School</p>
-        <p class="login-brand-division">Schools Division of Biñan City &middot; Region IV-A CALABARZON</p>
-        <hr class="login-brand-divider">
-        <p class="login-brand-tagline">MPS &amp; Item Analysis System</p>
-    </div>
-
-    <div class="login-form-panel">
-        <div class="login-card login-card--wide">
+<?php
+$layoutVariant = 'auth';
+$pageTitle = 'MPS System – Teacher Registration';
+$layoutBodyClass = 'auth-page register-page';
+require __DIR__ . '/includes/master_layout_start.php';
+?>
+<div class="register-box mps-register-box">
+    <div class="card card-outline card-primary">
+        <div class="card-header text-center">
+            <a class="h1 text-decoration-none" href="<?= BASE_URL ?>index.php"><img src="<?= BASE_URL ?>assets/logo.png" alt="" class="auth-logo"> MPS</a>
+            <p class="text-secondary mb-0">Jacobo Z. Gonzales Memorial National High School</p>
+        </div>
+        <div class="card-body">
             <h2 class="login-card-title">Teacher Self-Registration</h2>
             <p class="login-card-subtitle">Create your teacher account — pending admin approval after signup.</p>
 
@@ -201,17 +193,17 @@ $csrf = csrf_token();
             <div class="form-row">
                 <div class="form-group">
                     <label for="last_name">Last Name <span class="req">*</span></label>
-                    <input type="text" id="last_name" name="last_name"
+                    <input class="form-control" type="text" id="last_name" name="last_name"
                            value="<?= h($form['last_name'] ?? '') ?>" required>
                 </div>
                 <div class="form-group">
                     <label for="first_name">First Name <span class="req">*</span></label>
-                    <input type="text" id="first_name" name="first_name"
+                    <input class="form-control" type="text" id="first_name" name="first_name"
                            value="<?= h($form['first_name'] ?? '') ?>" required>
                 </div>
                 <div class="form-group">
                     <label for="middle_name">Middle Name</label>
-                    <input type="text" id="middle_name" name="middle_name"
+                    <input class="form-control" type="text" id="middle_name" name="middle_name"
                            value="<?= h($form['middle_name'] ?? '') ?>">
                 </div>
             </div>
@@ -222,16 +214,16 @@ $csrf = csrf_token();
             <div class="form-row">
                 <div class="form-group">
                     <label for="username">Username <span class="req">*</span></label>
-                    <input type="text" id="username" name="username"
+                    <input class="form-control" type="text" id="username" name="username"
                            value="<?= h($form['username'] ?? '') ?>" required autocomplete="username">
                 </div>
                 <div class="form-group">
                     <label for="password">Password <span class="req">*</span> <small>(min. 8 chars)</small></label>
-                    <input type="password" id="password" name="password" required autocomplete="new-password">
+                    <input class="form-control" type="password" id="password" name="password" required autocomplete="new-password">
                 </div>
                 <div class="form-group">
                     <label for="confirm_pass">Confirm Password <span class="req">*</span></label>
-                    <input type="password" id="confirm_pass" name="confirm_pass" required autocomplete="new-password">
+                    <input class="form-control" type="password" id="confirm_pass" name="confirm_pass" required autocomplete="new-password">
                 </div>
             </div>
         </fieldset>
@@ -244,7 +236,7 @@ $csrf = csrf_token();
                     <div class="checklist">
                         <?php foreach (AVAILABLE_GRADE_LEVELS as $gl): ?>
                         <label class="check-item">
-                            <input type="checkbox" name="grade_levels[]" value="<?= $gl ?>"
+                            <input class="form-check-input" type="checkbox" name="grade_levels[]" value="<?= $gl ?>"
                                    <?= in_array($gl, $form['grade_levels'] ?? [], true) ? 'checked' : '' ?>>
                             Grade <?= $gl ?>
                         </label>
@@ -256,7 +248,7 @@ $csrf = csrf_token();
                     <div class="checklist checklist--grid">
                         <?php foreach (AVAILABLE_SUBJECTS as $subj): ?>
                         <label class="check-item">
-                            <input type="checkbox" name="subjects[]" value="<?= h($subj) ?>"
+                            <input class="form-check-input" type="checkbox" name="subjects[]" value="<?= h($subj) ?>"
                                    <?= in_array($subj, $form['subjects'] ?? [], true) ? 'checked' : '' ?>>
                             <?= h($subj) ?>
                         </label>
@@ -281,7 +273,7 @@ $csrf = csrf_token();
                 <div class="checklist checklist--grid">
                     <?php foreach ($secs as $sec): ?>
                     <label class="check-item">
-                        <input type="checkbox" name="section_ids[]" value="<?= $sec['id'] ?>"
+                        <input class="form-check-input" type="checkbox" name="section_ids[]" value="<?= $sec['id'] ?>"
                                <?= in_array($sec['id'], $form['section_ids'] ?? [], true) ? 'checked' : '' ?>>
                         <?= h($sec['name']) ?>
                     </label>
@@ -292,13 +284,12 @@ $csrf = csrf_token();
             <?php endif; ?>
         </fieldset>
 
-        <button type="submit" class="btn btn-primary btn-full">Submit Registration</button>
+        <button type="submit" class="btn btn-primary w-100">Submit Registration</button>
     </form>
     <p class="auth-footer"><a href="<?= BASE_URL ?>index.php">&larr; Back to Login</a></p>
     <?php endif; ?>
         </div>
     </div>
-
 </div>
 <script>
 function syncSectionGroups() {
@@ -316,5 +307,4 @@ document.querySelectorAll('input[name="grade_levels[]"]').forEach(function(cb) {
 });
 syncSectionGroups(); // restore state on validation-error page reload
 </script>
-</body>
-</html>
+<?php require __DIR__ . '/includes/master_layout_end.php'; ?>

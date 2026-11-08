@@ -2,11 +2,15 @@
 // ============================================================
 // Database credentials — NEVER commit real values to VCS
 // ============================================================
-define('DB_HOST',    'localhost');
-define('DB_NAME',    'mps_db');        // change to your DB name
-define('DB_USER',    'root');           // change to your DB user
-define('DB_PASS',    '');               // change to your DB password
+// Set MPS_DB_DRIVER=sqlite for zero-setup local development. MySQL remains
+// the default for existing XAMPP and production installations.
+define('DB_DRIVER', getenv('MPS_DB_DRIVER') ?: 'mysql');
+define('DB_HOST',    getenv('MPS_DB_HOST') ?: 'localhost');
+define('DB_NAME',    getenv('MPS_DB_NAME') ?: 'mps_db');
+define('DB_USER',    getenv('MPS_DB_USER') ?: 'root');
+define('DB_PASS',    getenv('MPS_DB_PASS') ?: '');
 define('DB_CHARSET', 'utf8mb4');
+define('SQLITE_PATH', getenv('MPS_SQLITE_PATH') ?: (__DIR__ . '/../data/mps.sqlite'));
 
 // ============================================================
 // School / DepEd header constants
@@ -66,4 +70,5 @@ define('AVAILABLE_GRADE_LEVELS', [7, 8, 9, 10]);
 // '/mps/' when it lives in a subfolder  (e.g. http://localhost/mps/)
 // Trailing slash is required.
 // ============================================================
-define('BASE_URL', '/mps/');
+define('BASE_URL', getenv('MPS_BASE_URL') ?: (DB_DRIVER === 'sqlite' ? '/' : '/mps/'));
+define('SCANNER_PWA_URL', getenv('MPS_SCANNER_PWA_URL') ?: (BASE_URL . 'scanner/'));

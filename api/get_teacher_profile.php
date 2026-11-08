@@ -25,9 +25,23 @@ $usStmt = $pdo->prepare("SELECT subject_name FROM user_subjects WHERE user_id = 
 $usStmt->execute([$teacher_id]);
 $subjects = array_column($usStmt->fetchAll(), 'subject_name');
 
+$sectionStmt = $pdo->prepare(
+    "SELECT ta.school_year_id, sy.name AS school_year, ta.subject_id, sub.name AS subject_name,
+            sec.id AS section_id, sec.name AS section_name, sec.grade_level
+     FROM teacher_assignments ta
+     JOIN sections sec ON sec.id = ta.section_id
+     JOIN school_years sy ON sy.id = ta.school_year_id
+     JOIN subjects sub ON sub.id = ta.subject_id
+     WHERE ta.teacher_id = ?
+     ORDER BY sy.id DESC, sub.grade_level, sub.name, sec.grade_level, sec.name"
+);
+$sectionStmt->execute([$teacher_id]);
+$sectionAssignments = $sectionStmt->fetchAll();
+
 json_response([
     'display_name' => display_name($teacher),
     'username'      => $teacher['username'],
     'grade_levels'  => $gradeLevels,
     'subjects'      => $subjects,
+    'section_assignments' => $sectionAssignments,
 ]);

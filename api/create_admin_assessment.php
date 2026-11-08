@@ -31,13 +31,6 @@ if ($dateGiven && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateGiven)) {
 
 $pdo = get_pdo();
 
-// Verify subject and term exist
-if (!$pdo->prepare("SELECT id FROM subjects WHERE id = ?")->execute([$subjectId]) ||
-    !($pdo->prepare("SELECT id FROM subjects WHERE id = ?")->execute([$subjectId]) &&
-      $pdo->query("SELECT FOUND_ROWS()"))) {
-    // just proceed — FK will reject invalid IDs in the transaction
-}
-
 // Validate competency_ids belong to this subject
 $validCompIds = [];
 if (!empty($itemCompMap)) {

@@ -51,30 +51,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $csrf = csrf_token();
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MPS System – Login</title>
-<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
-</head>
-<body class="auth-page">
-<div class="login-split">
-
-    <div class="login-brand">
-        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
-        <p class="login-brand-name">Jacobo Z. Gonzales Memorial National High School</p>
-        <p class="login-brand-division">Schools Division of Biñan City &middot; Region IV-A CALABARZON</p>
-        <hr class="login-brand-divider">
-        <p class="login-brand-tagline">MPS &amp; Item Analysis System</p>
-    </div>
-
-    <div class="login-form-panel">
-        <div class="login-card">
-            <h2 class="login-card-title">Welcome Back</h2>
-            <p class="login-card-subtitle">Sign in to your account</p>
+<?php
+$layoutVariant = 'auth';
+$pageTitle = 'MPS System – Login';
+$layoutBodyClass = 'auth-page login-page';
+require __DIR__ . '/includes/master_layout_start.php';
+?>
+<div class="login-box mps-auth-box">
+    <div class="card card-outline card-primary">
+        <div class="card-header text-center">
+            <a class="h1 text-decoration-none" href="<?= BASE_URL ?>index.php"><img src="<?= BASE_URL ?>assets/logo.png" alt="" class="auth-logo"> MPS</a>
+            <p class="text-secondary mb-0">Jacobo Z. Gonzales Memorial National High School</p>
+        </div>
+        <div class="card-body">
+            <h2 class="login-card-title text-center">Welcome</h2>
+            <p class="login-card-subtitle text-center">Sign in to your account</p>
 
             <?php if ($error !== ''): ?>
             <div class="alert alert-error"><?= h($error) ?></div>
@@ -82,28 +73,28 @@ $csrf = csrf_token();
 
             <form method="post" action="" autocomplete="off">
                 <input type="hidden" name="csrf_token" value="<?= h($csrf) ?>">
-                <div class="form-group">
+                <div class="form-group mb-1">
                     <label for="username">Username</label>
                     <div class="input-icon-wrap">
                         <span class="input-icon">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                         </span>
-                        <input type="text" id="username" name="username"
+                        <input class="form-control" type="text" id="username" name="username"
                                value="<?= h($_POST['username'] ?? '') ?>"
                                required autofocus autocomplete="username">
                     </div>
                 </div>
-                <div class="form-group">
+                <div class="form-group mb-2">
                     <label for="password">Password</label>
                     <div class="input-icon-wrap">
                         <span class="input-icon">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                         </span>
-                        <input type="password" id="password" name="password"
+                        <input class="form-control" type="password" id="password" name="password"
                                required autocomplete="current-password">
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+                <button type="submit" class="btn btn-primary w-100">Sign In</button>
             </form>
             <p class="auth-footer">
                 New teacher? <a href="<?= BASE_URL ?>register.php">Create an account</a>
@@ -114,5 +105,4 @@ $csrf = csrf_token();
     </div>
 
 </div>
-</body>
-</html>
+<?php require __DIR__ . '/includes/master_layout_end.php'; ?>

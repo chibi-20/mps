@@ -20,10 +20,13 @@ if ($activeSYId) {
 }
 
 $subjects    = $pdo->query("SELECT DISTINCT name FROM subjects ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
-$subjectsAll = $pdo->query("SELECT id, name, grade_level FROM subjects ORDER BY grade_level, name")->fetchAll();
+$subjectsAll = $pdo->query("SELECT s.id, s.name, s.grade_level, s.grade_level_id FROM subjects s ORDER BY s.grade_level, s.name")->fetchAll();
 $gradeLevels = $pdo->query(
-    "SELECT DISTINCT grade_level FROM sections ORDER BY grade_level"
+    "SELECT level FROM grade_levels ORDER BY level"
 )->fetchAll(PDO::FETCH_COLUMN);
+$settingsYears = $pdo->query("SELECT id, name, is_active FROM school_years ORDER BY id DESC")->fetchAll();
+$settingsGrades = $pdo->query("SELECT id, level FROM grade_levels ORDER BY level")->fetchAll();
+$settingsSections = $pdo->query("SELECT s.id, s.name, s.grade_level, s.grade_level_id, s.school_year_id, sy.name AS school_year FROM sections s JOIN school_years sy ON sy.id=s.school_year_id ORDER BY sy.id DESC, s.grade_level, s.name")->fetchAll();
 
 // All terms across all school years (for edit modal + assessments filter)
 $allTerms = $pdo->query(
@@ -37,40 +40,63 @@ foreach ($allTerms as &$_t) {
 }
 unset($_t);
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Admin Dashboard – MPS System</title>
-<link rel="icon" href="<?= BASE_URL ?>assets/logo.png">
-<link rel="stylesheet" href="<?= asset_url('styles.css') ?>">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-</head>
-<body>
+<?php
+$pageTitle = 'Admin Dashboard';
+$activeNavPage = 'dashboard';
+$layoutBodyClass = 'admin-dashboard layout-fixed sidebar-expand-lg bg-body-tertiary';
+$layoutHeadAssets = '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tabulator-tables@6.6.0/dist/css/tabulator_bootstrap5.min.css"><script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>';
+require __DIR__ . '/includes/master_layout_start.php';
+?>
 
-<nav class="topnav">
-    <div class="topnav-brand">
-        <img src="<?= BASE_URL ?>assets/logo.png" alt="Jacobo Z. Gonzales Memorial National High School" class="school-logo">
-        <span class="topnav-title">MPS &amp; Item Analysis System</span>
+<div class="mps-page-heading">
+    <div>
+        <h1 id="mpsPageTitle">Executive Academic Overview</h1>
     </div>
-    <div class="topnav-user">
-        <span class="user-chip admin-chip">Admin</span>
-        <span><?= h($sess['display']) ?></span>
-        <a href="<?= BASE_URL ?>api/logout.php" class="btn btn-sm btn-outline">Sign Out</a>
-    </div>
-</nav>
+    <button id="headerCreateAssessment" class="btn btn-primary" style="display:none" onclick="openCreateAsmtModal()"><i class="bi bi-plus-lg"></i> Create Assessment</button>
+</div>
 
-<!-- Tab Navigation -->
-<div class="admin-tabs">
-    <button class="admin-tab active" data-panel="analytics"     onclick="adminTab(this,'analytics')">Analytics</button>
-    <button class="admin-tab" data-panel="submissions"          onclick="adminTab(this,'submissions')">Submissions</button>
-    <button class="admin-tab" data-panel="competencies"         onclick="adminTab(this,'competencies')">Learning Competencies</button>
-    <button class="admin-tab" data-panel="assessments"          onclick="adminTab(this,'assessments')">Assessments</button>
-    <button class="admin-tab" data-panel="teachers"             onclick="adminTab(this,'teachers')">Teacher Accounts</button>
-    <button class="admin-tab" data-panel="assignments"          onclick="adminTab(this,'assignments')">Section Assignments</button>
-    <button class="btn btn-import" style="margin-left:auto;align-self:center;margin-right:.75rem"
-            onclick="openCreateAsmtModal()">+ Create Assessment</button>
+<!-- ============================================================
+     PANEL: SETTINGS / REFERENCE TABLES
+============================================================ -->
+<div id="panel-settings" class="admin-panel" style="display:none">
+    <div class="mps-metric-grid mps-settings-metrics">
+        <div class="mps-metric-card"><span>School Years</span><strong><?= count($settingsYears) ?></strong><small>Academic cycles</small></div>
+        <div class="mps-metric-card"><span>Grade Levels</span><strong><?= count($settingsGrades) ?></strong><small>Configured grades</small></div>
+        <div class="mps-metric-card"><span>Sections</span><strong><?= count($settingsSections) ?></strong><small>Class allocations</small></div>
+        <div class="mps-metric-card"><span>Subjects</span><strong><?= count($subjectsAll) ?></strong><small>Learning areas</small></div>
+    </div>
+    <div class="mps-settings-grid">
+    <div class="card">
+        <div class="settings-head"><div><h3 class="card-title" style="margin:0">School Years</h3><p class="text-muted" style="margin:.25rem 0 0">Use the ID when encoding year barcodes.</p></div><button class="btn btn-primary btn-sm" onclick="openCatalogForm('year')">+ Add Year</button></div>
+        <div class="table-scroll table-responsive"><table class="data-table table align-middle"><thead><tr><th>ID</th><th>School Year</th><th>Active</th><th>Actions</th></tr></thead><tbody><?php foreach ($settingsYears as $row): ?><tr><td><?= (int)$row['id'] ?></td><td><?= h($row['name']) ?></td><td><?= $row['is_active'] ? 'Yes' : 'No' ?></td><td><button class="btn btn-sm btn-outline-secondary" onclick='openCatalogForm("year",<?= (int)$row['id'] ?>,<?= json_encode($row['name']) ?>,<?= (int)$row['is_active'] ?>)'>Edit</button></td></tr><?php endforeach; ?></tbody></table></div>
+    </div>
+    <div class="card">
+        <div class="settings-head"><div><h3 class="card-title" style="margin:0">Grades</h3><p class="text-muted" style="margin:.25rem 0 0">Grade IDs are stable lookup values for scanning.</p></div><button class="btn btn-primary btn-sm" onclick="openCatalogForm('grade')">+ Add Grade</button></div>
+        <div class="table-scroll table-responsive"><table class="data-table table align-middle"><thead><tr><th>ID</th><th>Grade Level</th><th>Actions</th></tr></thead><tbody><?php foreach ($settingsGrades as $row): ?><tr><td><?= (int)$row['id'] ?></td><td>Grade <?= (int)$row['level'] ?></td><td><button class="btn btn-sm btn-outline-secondary" onclick="openCatalogForm('grade',<?= (int)$row['id'] ?>,<?= (int)$row['level'] ?>)">Edit</button></td></tr><?php endforeach; ?></tbody></table></div>
+    </div>
+    <div class="card">
+        <div class="settings-head"><div><h3 class="card-title" style="margin:0">Sections</h3><p class="text-muted" style="margin:.25rem 0 0">Section IDs are used on student answer sheet barcodes.</p></div><button class="btn btn-primary btn-sm" onclick="openCatalogForm('section')">+ Add Section</button></div>
+        <div class="table-scroll table-responsive"><table class="data-table table align-middle"><thead><tr><th>ID</th><th>Section</th><th>Grade</th><th>School Year</th><th>Actions</th></tr></thead><tbody><?php foreach ($settingsSections as $row): ?><tr><td><?= (int)$row['id'] ?></td><td><?= h($row['name']) ?></td><td><?= (int)$row['grade_level'] ?></td><td><?= h($row['school_year']) ?></td><td><button class="btn btn-sm btn-outline-secondary" onclick='openCatalogForm("section",<?= (int)$row['id'] ?>,<?= json_encode($row['name']) ?>,<?= (int)$row['grade_level_id'] ?>,<?= (int)$row['school_year_id'] ?>)'>Edit</button></td></tr><?php endforeach; ?></tbody></table></div>
+    </div>
+    <div class="card">
+        <div class="settings-head"><div><h3 class="card-title" style="margin:0">Subjects</h3><p class="text-muted" style="margin:.25rem 0 0">Subject IDs identify subjects in assessments and scanned forms.</p></div><button class="btn btn-primary btn-sm" onclick="openCatalogForm('subject')">+ Add Subject</button></div>
+        <div class="table-scroll table-responsive"><table class="data-table table align-middle"><thead><tr><th>ID</th><th>Subject</th><th>Grade</th><th>Actions</th></tr></thead><tbody><?php foreach ($subjectsAll as $row): ?><tr><td><?= (int)$row['id'] ?></td><td><?= h($row['name']) ?></td><td>Grade <?= (int)$row['grade_level'] ?></td><td><button class="btn btn-sm btn-outline-secondary" onclick='openCatalogForm("subject",<?= (int)$row['id'] ?>,<?= json_encode($row['name']) ?>,<?= (int)$row['grade_level_id'] ?>)'>Edit</button></td></tr><?php endforeach; ?></tbody></table></div>
+    </div>
+    </div>
+</div>
+
+<div id="catalogModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeCatalogForm()">
+    <div class="modal-box">
+        <h3 id="catalogTitle" style="color:var(--maroon-dark);margin-bottom:1rem">Edit</h3>
+        <input type="hidden" id="catalogType"><input type="hidden" id="catalogId">
+        <div class="form-group" id="catalogNameWrap"><label id="catalogNameLabel">Name</label><input id="catalogName" maxlength="120"></div>
+        <div class="form-group" id="catalogLevelWrap" style="display:none"><label>Grade Level</label><input id="catalogLevel" type="number" min="1" max="20"></div>
+        <div class="form-group" id="catalogGradeWrap" style="display:none"><label>Grade</label><select id="catalogGrade"><?php foreach ($settingsGrades as $grade): ?><option value="<?= (int)$grade['id'] ?>">Grade <?= (int)$grade['level'] ?> (ID <?= (int)$grade['id'] ?>)</option><?php endforeach; ?></select></div>
+        <div class="form-group" id="catalogYearWrap" style="display:none"><label>School Year</label><select id="catalogYear"><?php foreach ($settingsYears as $year): ?><option value="<?= (int)$year['id'] ?>"><?= h($year['name']) ?></option><?php endforeach; ?></select></div>
+        <label id="catalogActiveWrap" style="display:none"><input id="catalogActive" type="checkbox"> Set as active school year</label>
+        <p id="catalogError" class="text-muted" role="alert"></p>
+        <div class="form-actions"><button class="btn btn-primary" onclick="saveCatalogRecord()">Save</button><button class="btn btn-outline-secondary" onclick="closeCatalogForm()">Cancel</button></div>
+    </div>
 </div>
 
 <!-- ============================================================
@@ -112,8 +138,8 @@ unset($_t);
         <select id="f_assessment" onchange="refreshDashboard()">
             <option value="">All Assessments</option>
         </select>
-        <button id="btnRefresh" class="btn btn-sm btn-outline" onclick="refreshDashboard()" disabled>Refresh</button>
-        <button id="btnExportSubject" class="btn btn-sm btn-outline" onclick="exportSubjectReport()" disabled
+        <button id="btnRefresh" class="btn btn-sm btn-outline-secondary" onclick="refreshDashboard()" disabled>Refresh</button>
+        <button id="btnExportSubject" class="btn btn-sm btn-outline-secondary" onclick="exportSubjectReport()" disabled
                 title="Select a subject to enable export">Export Subject Report</button>
     </div>
 
@@ -129,21 +155,21 @@ unset($_t);
 
     <!-- KPI Cards -->
     <div class="kpi-grid">
-        <div class="kpi-card">
+        <div class="card kpi-card">
             <div class="kpi-label">Overall MPS</div>
             <div class="kpi-value" id="kpi_mps">—</div>
             <div class="kpi-sub">Target: 75%</div>
             <div class="kpi-bar"><div class="kpi-bar-fill" id="kpi_mps_bar"></div><div class="kpi-bar-target"></div></div>
         </div>
-        <div class="kpi-card">
+        <div class="card kpi-card">
             <div class="kpi-label">Total Examinees</div>
             <div class="kpi-value" id="kpi_examinees">—</div>
         </div>
-        <div class="kpi-card">
+        <div class="card kpi-card">
             <div class="kpi-label">Submitted Assessments</div>
             <div class="kpi-value" id="kpi_submitted">—</div>
         </div>
-        <div class="kpi-card kpi-card--alert">
+        <div class="card kpi-card kpi-card--alert">
             <div class="kpi-label">Items Below 50%</div>
             <div class="kpi-value" id="kpi_below50">—</div>
             <div class="kpi-sub">Needs attention</div>
@@ -183,8 +209,8 @@ unset($_t);
         <p id="plEnrollmentHint" class="text-muted" style="font-size:.82rem;margin:-.25rem 0 .5rem">
             Select a specific Term (not "All Terms") to enter enrollment and see how many learners did not take the test.
         </p>
-        <div class="table-scroll">
-            <table id="plDistTable" class="data-table"></table>
+        <div class="table-scroll table-responsive">
+            <table id="plDistTable" class="data-table table align-middle"></table>
         </div>
     </div>
 
@@ -206,7 +232,7 @@ unset($_t);
             <small class="text-muted" id="compChartNote">(items with competency mapping only)</small>
         </h4>
         <div style="position:relative;height:300px"><canvas id="chartCompetency"></canvas></div>
-        <div id="compDrillTable" class="table-scroll" style="margin-top:1rem"></div>
+        <div id="compDrillTable" class="table-scroll table-responsive" style="margin-top:1rem"></div>
     </div>
 
     <!-- Item % Heatmap (HTML table) -->
@@ -214,8 +240,8 @@ unset($_t);
         <h4 class="card-title">Item %-Correct Heatmap
             <small class="text-muted">— Red &lt;50% · Yellow 50–74% · Green ≥75%</small>
         </h4>
-        <div class="table-scroll">
-            <table id="heatmapTable" class="data-table heatmap-table"></table>
+        <div class="table-scroll table-responsive">
+            <table id="heatmapTable" class="data-table table align-middle heatmap-table"></table>
         </div>
     </div>
 
@@ -254,7 +280,7 @@ unset($_t);
                 </div>
                 <div class="form-actions">
                     <button type="submit" class="btn btn-primary">Save Enrollment</button>
-                    <button type="button" class="btn btn-outline" onclick="closeEnrollmentModal()">Cancel</button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="closeEnrollmentModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -265,12 +291,18 @@ unset($_t);
      PANEL: SUBMISSIONS
 ============================================================ -->
 <div id="panel-submissions" class="admin-panel" style="display:none">
+    <div class="mps-metric-grid" aria-live="polite">
+        <div class="mps-metric-card"><span>Total Submissions</span><strong id="submissionMetricTotal">—</strong><small>Across all assessments</small></div>
+        <div class="mps-metric-card mps-metric-success"><span>Approved</span><strong id="submissionMetricApproved">—</strong><small>Reviewed and complete</small></div>
+        <div class="mps-metric-card mps-metric-warning"><span>Awaiting Review</span><strong id="submissionMetricReview">—</strong><small>Submitted by teachers</small></div>
+        <div class="mps-metric-card mps-metric-critical"><span>Needs Attention</span><strong id="submissionMetricAttention">—</strong><small>Draft or returned</small></div>
+    </div>
     <div class="card">
-        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
-            <h3 class="card-title" style="margin:0">Submission Compliance</h3>
+        <div style="margin-bottom:.75rem">
+            <h3 class="card-title" style="margin:0 0 .75rem">Submission Compliance</h3>
+            <div class="filter-grid">
             <input type="text" id="subCompSearch" placeholder="Search teacher, assessment, or subject&hellip;"
-                   oninput="filterComplianceTable()"
-                   style="flex:1;min-width:200px;max-width:320px">
+                   oninput="filterComplianceTable()">
             <select id="subCompStatusFilter" onchange="filterComplianceTable()">
                 <option value="">All Statuses</option>
                 <option value="draft">Draft</option>
@@ -284,10 +316,11 @@ unset($_t);
             <select id="subCompTypeFilter" onchange="filterComplianceTable()">
                 <option value="">All Types</option>
             </select>
+            </div>
             <span id="subCompCount" class="text-muted" style="font-size:.85rem"></span>
         </div>
-        <div class="table-scroll">
-            <table id="complianceTable" class="data-table">
+        <div class="table-scroll table-responsive">
+            <table id="complianceTable" class="data-table table align-middle">
                 <thead><tr><th>Teacher</th><th>Assessment</th><th>Subject</th><th>Term</th><th>Type</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody id="complianceTbody"></tbody>
             </table>
@@ -307,7 +340,7 @@ unset($_t);
                 </div>
                 <div class="form-actions">
                     <button type="submit" class="btn btn-warning">Return Assessment</button>
-                    <button type="button" class="btn btn-outline" onclick="closeReturnModal()">Cancel</button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="closeReturnModal()">Cancel</button>
                 </div>
             </form>
         </div>
@@ -318,6 +351,12 @@ unset($_t);
      PANEL: TEACHER ACCOUNTS
 ============================================================ -->
 <div id="panel-teachers" class="admin-panel" style="display:none">
+    <div class="mps-metric-grid" aria-live="polite">
+        <div class="mps-metric-card"><span>Active Faculty</span><strong id="teacherMetricActive">—</strong><small>Active teacher accounts</small></div>
+        <div class="mps-metric-card mps-metric-warning"><span>Pending Approval</span><strong id="teacherMetricPending">—</strong><small>Awaiting administrator review</small></div>
+        <div class="mps-metric-card mps-metric-critical"><span>Password Requests</span><strong id="teacherMetricResets">—</strong><small>Pending reset requests</small></div>
+        <div class="mps-metric-card mps-metric-success"><span>Subject Areas</span><strong id="teacherMetricSubjects">—</strong><small>Distinct assigned subjects</small></div>
+    </div>
 
     <!-- Pending reset requests — shown by JS when non-empty -->
     <div class="card" id="pendingResetCard" style="display:none;border:1.5px solid var(--c-warning)">
@@ -325,8 +364,8 @@ unset($_t);
         <p style="font-size:.875rem;color:var(--c-muted);margin-bottom:.75rem">
             Teachers who have requested a reset via the login page. Use "Reset Now" to generate a temp password and relay it to the teacher.
         </p>
-        <div class="table-scroll">
-            <table class="data-table">
+        <div class="table-scroll table-responsive">
+            <table class="data-table table align-middle">
                 <thead><tr><th>Name / Username Submitted</th><th>Requested</th><th>Action</th></tr></thead>
                 <tbody id="pendingResetTbody"></tbody>
             </table>
@@ -335,8 +374,8 @@ unset($_t);
 
     <div class="card">
         <h3 class="card-title">Pending Approval</h3>
-        <div class="table-scroll">
-            <table class="data-table">
+        <div class="table-scroll table-responsive">
+            <table class="data-table table align-middle">
                 <thead><tr><th>Name</th><th>Username</th><th>Grade Levels</th><th>Subjects</th><th>Registered</th><th>Actions</th></tr></thead>
                 <tbody id="pendingTbody"></tbody>
             </table>
@@ -346,12 +385,13 @@ unset($_t);
     <div class="card">
         <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem">
             <h3 class="card-title" style="margin:0">Active Teachers</h3>
+            <button class="btn btn-primary" style="margin-left:auto" onclick="openCreateTeacherModal()">+ Add Teacher</button>
             <input type="text" id="teacherSearch" placeholder="Search name or username&hellip;"
                    oninput="filterTeacherTable()"
                    style="flex:1;min-width:160px;max-width:280px">
         </div>
-        <div class="table-scroll">
-            <table class="data-table">
+        <div class="table-scroll table-responsive">
+            <table class="data-table table align-middle">
                 <thead><tr><th>Name</th><th>Username</th><th>Grade Levels</th><th>Subjects</th><th>Actions</th></tr></thead>
                 <tbody id="activeTbody"></tbody>
             </table>
@@ -359,46 +399,25 @@ unset($_t);
     </div>
 </div>
 
-<!-- ============================================================
-     PANEL: SECTION ASSIGNMENTS
-     Admin can bulk-set which sections a teacher is responsible
-     for per subject. These become the pre-checked defaults when
-     the teacher creates a new assessment for that subject.
-============================================================ -->
-<div id="panel-assignments" class="admin-panel" style="display:none">
-    <div class="card">
-        <h3 class="card-title">Section Assignments</h3>
-        <p class="text-muted" style="margin-bottom:1rem">
-            Set the default sections for a teacher's subject load. These appear pre-checked
-            when the teacher opens "Create New Assessment" for that subject.
-        </p>
-
-        <div class="form-row" style="align-items:flex-end;gap:1rem;margin-bottom:1rem">
-            <div class="form-group" style="margin:0">
-                <label>Teacher</label>
-                <select id="assignTeacher" onchange="adminLoadTeacherSubjects(this.value)">
-                    <option value="">— select teacher —</option>
-                </select>
-            </div>
-            <div class="form-group" style="margin:0">
-                <label>Subject</label>
-                <select id="assignSubject" disabled onchange="adminLoadAssignmentSections()">
-                    <option value="">— select subject —</option>
-                </select>
-            </div>
+<div id="createTeacherModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeCreateTeacherModal()">
+    <div class="modal-box modal-box--wide">
+        <h3 style="color:var(--maroon-dark);margin-bottom:1rem">Add Teacher Account</h3>
+        <div class="form-row">
+            <div class="form-group"><label>Last Name <span class="req">*</span></label><input id="newTeacherLast" maxlength="100"></div>
+            <div class="form-group"><label>First Name <span class="req">*</span></label><input id="newTeacherFirst" maxlength="100"></div>
+            <div class="form-group"><label>Middle Name</label><input id="newTeacherMiddle" maxlength="100"></div>
         </div>
-
-        <div id="assignSectionWrap" style="display:none">
-            <label style="display:block;font-weight:600;margin-bottom:.5rem">
-                Sections
-                <small class="text-muted" id="assignSectionHint"></small>
-            </label>
-            <div id="assignSectionChecklist" class="checklist checklist--grid"></div>
-            <div style="margin-top:1rem">
-                <button class="btn btn-primary" onclick="adminSaveAssignments()">Save Assignments</button>
-                <span id="assignSaveMsg" style="margin-left:1rem;font-size:.9rem"></span>
-            </div>
+        <div class="form-row">
+            <div class="form-group"><label>Username <span class="req">*</span></label><input id="newTeacherUsername" maxlength="50" autocomplete="off"></div>
+            <div class="form-group"><label>Temporary Password <span class="req">*</span> <small>(min. 8 chars)</small></label><input id="newTeacherPassword" type="password" autocomplete="new-password"></div>
         </div>
+        <div class="form-group"><label>Grade Level(s) <span class="req">*</span></label><div class="checklist checklist--grid"><?php foreach (AVAILABLE_GRADE_LEVELS as $gl): ?><label class="check-item"><input type="checkbox" name="new_teacher_grade" value="<?= (int)$gl ?>" onchange="renderCreateTeacherSectionAssignments()"> Grade <?= (int)$gl ?></label><?php endforeach; ?></div></div>
+        <div class="form-group"><label>Subject(s) <span class="req">*</span></label><div class="checklist checklist--grid"><?php foreach (AVAILABLE_SUBJECTS as $subj): ?><label class="check-item"><input type="checkbox" name="new_teacher_subject" value="<?= h($subj) ?>" onchange="renderCreateTeacherSectionAssignments()"> <?= h($subj) ?></label><?php endforeach; ?></div></div>
+        <div class="form-group"><label for="newTeacherAssignmentYear">School Year for Section Assignments</label><select id="newTeacherAssignmentYear" onchange="renderCreateTeacherSectionAssignments()"><?php foreach ($settingsYears as $year): ?><option value="<?= (int)$year['id'] ?>" <?= !empty($year['is_active']) ? 'selected' : '' ?>><?= h($year['name']) ?><?= !empty($year['is_active']) ? ' (Active)' : '' ?></option><?php endforeach; ?></select></div>
+        <div class="form-group"><label>Section(s) by Subject</label><div id="newTeacherSectionAssignments" class="checklist" style="max-height:240px;overflow:auto"><span class="text-muted">Select grades and subjects first.</span></div></div>
+        <p class="text-muted" style="font-size:.85rem">The account will be active immediately and the teacher will be asked to change this password at first sign-in.</p>
+        <p id="createTeacherError" class="text-muted" role="alert"></p>
+        <div class="form-actions"><button class="btn btn-primary" id="btnCreateTeacher" onclick="createTeacherAccount()">Create Account</button><button class="btn btn-outline-secondary" onclick="closeCreateTeacherModal()">Cancel</button></div>
     </div>
 </div>
 
@@ -406,11 +425,16 @@ unset($_t);
      PANEL: LEARNING COMPETENCIES
 ============================================================ -->
 <div id="panel-competencies" class="admin-panel" style="display:none">
+    <div class="mps-metric-grid mps-competency-metrics">
+        <div class="mps-metric-card"><span>Competencies Loaded</span><strong id="competencyMetricCount">—</strong><small>For the selected subject and term</small></div>
+        <div class="mps-metric-card"><span>Subject Scope</span><strong id="competencyMetricSubject">Select subject</strong><small>Choose a learning area below</small></div>
+        <div class="mps-metric-card"><span>Term Scope</span><strong id="competencyMetricTerm">All terms</strong><small>Choose a term to add entries</small></div>
+    </div>
     <div class="card">
         <div class="comp-filter-row">
             <h3 class="card-title" style="margin:0">Learning Competencies</h3>
             <div class="comp-filter-selects">
-            <select id="compSubjectFilter" onchange="loadCompetencies()" style="flex:2;min-width:180px">
+            <select id="compSubjectFilter" onchange="loadCompetencies()">
                 <option value="">— Select Subject —</option>
                 <?php foreach ($subjectsAll as $s): ?>
                 <option value="<?= $s['id'] ?>" data-grade="<?= $s['grade_level'] ?>">
@@ -418,13 +442,13 @@ unset($_t);
                 </option>
                 <?php endforeach; ?>
             </select>
-            <select id="compTermFilter" onchange="loadCompetencies(); updateCompAddState();" style="flex:1;min-width:140px">
+            <select id="compTermFilter" onchange="loadCompetencies(); updateCompAddState();">
                 <option value="">All Terms</option>
                 <?php foreach ($terms as $t): ?>
                 <option value="<?= $t['id'] ?>"><?= h(termLabel($t)) ?></option>
                 <?php endforeach; ?>
             </select>
-            <button class="btn btn-sm btn-outline" id="btnCompCsv" onclick="openCompCsvModal()" disabled
+            <button class="btn btn-sm btn-outline-secondary" id="btnCompCsv" onclick="openCompCsvModal()" disabled
                     title="Select a subject and term first">&#x2B06; Bulk Import CSV</button>
             </div><!-- /.comp-filter-selects -->
         </div><!-- /.comp-filter-row -->
@@ -434,8 +458,8 @@ unset($_t);
         </div>
 
         <div id="compTableWrap" style="display:none">
-            <div class="table-scroll">
-                <table class="data-table" id="compTable">
+            <div class="table-scroll table-responsive">
+                <table class="data-table table align-middle" id="compTable">
                     <colgroup>
                         <col style="width:130px">
                         <col>
@@ -476,6 +500,13 @@ unset($_t);
 ============================================================ -->
 <div id="panel-assessments" class="admin-panel" style="display:none">
 
+    <div class="mps-metric-grid" aria-live="polite">
+        <div class="mps-metric-card"><span>Assessments</span><strong id="assessmentMetricCount">—</strong><small>Matching current filters</small></div>
+        <div class="mps-metric-card"><span>Total Items</span><strong id="assessmentMetricItems">—</strong><small>Across matching assessments</small></div>
+        <div class="mps-metric-card mps-metric-success"><span>Sections Encoded</span><strong id="assessmentMetricSections">—</strong><small>Across matching assessments</small></div>
+        <div class="mps-metric-card"><span>Teachers Encoding</span><strong id="assessmentMetricTeachers">—</strong><small>Across matching assessments</small></div>
+    </div>
+
     <!-- Filter bar -->
     <div class="card filter-bar">
         <strong>Filters:</strong>
@@ -510,9 +541,9 @@ unset($_t);
             <option value="summative">Summative</option>
             <option value="term_exam">Term Exam</option>
         </select>
-        <input type="text" id="af_search" placeholder="Search title…" style="flex:1;min-width:140px"
+        <input type="text" id="af_search" placeholder="Search title…"
                onkeydown="if(event.key==='Enter')loadAdminAssessments()">
-        <button class="btn btn-sm btn-outline" onclick="loadAdminAssessments()">Search</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadAdminAssessments()">Search</button>
     </div>
 
     <!-- Table -->
@@ -520,36 +551,8 @@ unset($_t);
         <div id="asmtListEmpty" class="text-muted" style="display:none;padding:.5rem 0">
             No admin-created assessments match this filter.
         </div>
-        <div class="table-scroll" id="asmtListWrap" style="display:none">
-            <table id="asmtListTable" class="data-table">
-                <colgroup>
-                    <col class="asmtcol-title">
-                    <col class="asmtcol-type">
-                    <col class="asmtcol-subject">
-                    <col class="asmtcol-term">
-                    <col class="asmtcol-items">
-                    <col class="asmtcol-date">
-                    <col class="asmtcol-secs">
-                    <col class="asmtcol-teachers">
-                    <col class="asmtcol-status">
-                    <col class="asmtcol-actions">
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>Type</th>
-                        <th>Subject</th>
-                        <th>Term</th>
-                        <th style="text-align:right">Items</th>
-                        <th>Date Given</th>
-                        <th style="text-align:right">Secs Encoded</th>
-                        <th style="text-align:right">Teachers</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="asmtListTbody"></tbody>
-            </table>
+        <div id="asmtListWrap" style="display:none">
+            <div id="asmtListTable" class="assessment-tabulator" aria-label="Assessments"></div>
         </div>
         <div id="asmtListLoading" class="text-muted" style="padding:.5rem 0">
             Click <strong>Search</strong> or switch to this tab to load assessments.
@@ -621,7 +624,7 @@ unset($_t);
                     <input type="number" id="editBulkFrom" min="1" style="width:60px" placeholder="1">
                     <span>–</span>
                     <input type="number" id="editBulkTo" min="1" style="width:60px">
-                    <button class="btn btn-sm btn-outline" onclick="applyEditBulkAssign()">Apply</button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="applyEditBulkAssign()">Apply</button>
                 </div>
                 <div id="editCompMappingGrid" style="overflow-y:auto;margin-top:.75rem">
                     <p class="text-muted">Loading…</p>
@@ -635,7 +638,7 @@ unset($_t);
         <div class="modal-tall-footer">
             <button id="btnSaveEdit" class="btn btn-primary" onclick="saveEditAsmt()">Save Changes</button>
             <span id="editAsmtErr" style="font-size:.84rem;color:var(--c-danger);flex:1"></span>
-            <button class="btn btn-outline" onclick="closeEditAsmtModal()">Cancel</button>
+            <button class="btn btn-outline-secondary" onclick="closeEditAsmtModal()">Cancel</button>
         </div>
 
     </div>
@@ -661,7 +664,7 @@ unset($_t);
                 &#x1F5D1; Delete
             </button>
             <span id="deleteAsmtErr" style="font-size:.84rem;color:var(--c-danger);flex:1"></span>
-            <button class="btn btn-outline" onclick="closeDeleteAsmtModal()">Cancel</button>
+            <button class="btn btn-outline-secondary" onclick="closeDeleteAsmtModal()">Cancel</button>
         </div>
     </div>
 </div>
@@ -680,7 +683,7 @@ unset($_t);
         <div id="compCsvResult" style="margin-top:.5rem;font-size:.85rem"></div>
         <div class="form-actions" style="margin-top:1rem">
             <button class="btn btn-primary" onclick="doCompCsvImport()">Import</button>
-            <button class="btn btn-outline" onclick="closeCompCsvModal()">Cancel</button>
+            <button class="btn btn-outline-secondary" onclick="closeCompCsvModal()">Cancel</button>
         </div>
     </div>
 </div>
@@ -786,7 +789,7 @@ unset($_t);
                 <input type="number" id="bulkFrom" min="1" style="width:60px" placeholder="1">
                 <span>–</span>
                 <input type="number" id="bulkTo"   min="1" style="width:60px" placeholder="5">
-                <button class="btn btn-sm btn-outline" onclick="applyBulkAssign()">Apply</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="applyBulkAssign()">Apply</button>
             </div>
 
             <div id="compMappingGrid" style="max-height:340px;overflow-y:auto;margin-top:.75rem"></div>
@@ -801,11 +804,11 @@ unset($_t);
 
         <!-- Navigation buttons -->
         <div class="form-actions" style="margin-top:1.5rem;border-top:1px solid var(--c-border);padding-top:1rem">
-            <button id="btnCreatePrev" class="btn btn-outline" onclick="createAsmtPrev()" style="display:none">← Back</button>
+            <button id="btnCreatePrev" class="btn btn-outline-secondary" onclick="createAsmtPrev()" style="display:none">← Back</button>
             <span id="createAsmtErr" class="text-muted" style="font-size:.85rem;flex:1"></span>
             <button id="btnCreateNext" class="btn btn-primary" onclick="createAsmtNext()">Next →</button>
-            <button id="btnCreateDone" class="btn btn-submit-final" onclick="doCreateAssessment()" style="display:none">&#x2713; Create Assessment</button>
-            <button class="btn btn-outline" onclick="closeCreateAsmtModal()">Cancel</button>
+            <button id="btnCreateDone" class="btn btn-primary" onclick="doCreateAssessment()" style="display:none">&#x2713; Create Assessment</button>
+            <button class="btn btn-outline-secondary" onclick="closeCreateAsmtModal()">Cancel</button>
         </div>
     </div>
 </div>
@@ -813,6 +816,8 @@ unset($_t);
 <script>
 const BASE_URL        = <?= json_encode(BASE_URL) ?>;
 const CSRF_TOKEN      = <?= json_encode($csrf) ?>;
+const CATALOG_GRADES = <?= json_encode($settingsGrades) ?>;
+const CATALOG_YEARS = <?= json_encode($settingsYears) ?>;
 const MASTERY_BANDS   = <?= json_encode(array_map(fn($b) => ['label'=>$b['label'],'min'=>$b['min'],'max'=>$b['max']], MASTERY_BANDS)) ?>;
 const BAND_KEYS       = <?= json_encode(array_keys(MASTERY_BANDS)) ?>;
 const BAND_COLORS     = {
@@ -828,7 +833,61 @@ const SUBJECTS_ALL    = <?= json_encode($subjectsAll) ?>;
 const ALL_TERMS       = <?= json_encode($allTerms) ?>;
 const AVAILABLE_SUBJECTS_LIST     = <?= json_encode(AVAILABLE_SUBJECTS) ?>;
 const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
+const TEACHER_SECTION_CATALOG = <?= json_encode($settingsSections) ?>;
+const SCHOOL_YEARS_CATALOG = <?= json_encode($settingsYears) ?>;
+const ACTIVE_SCHOOL_YEAR_ID = <?= (int)$activeSYId ?>;
+function openCatalogForm(type, id = 0, value = '', gradeId = 0, yearId = 0) {
+    document.getElementById('catalogType').value = type;
+    document.getElementById('catalogId').value = id;
+    document.getElementById('catalogError').textContent = '';
+    document.getElementById('catalogTitle').textContent = `${id ? 'Edit' : 'Add'} ${type === 'year' ? 'School Year' : type === 'grade' ? 'Grade' : type === 'section' ? 'Section' : 'Subject'}`;
+    document.getElementById('catalogNameWrap').style.display = ['year','section','subject'].includes(type) ? '' : 'none';
+    document.getElementById('catalogNameLabel').textContent = type === 'year' ? 'School Year (e.g. 2026-2027)' : type === 'section' ? 'Section Name' : 'Subject Name';
+    document.getElementById('catalogName').value = type === 'grade' ? '' : value;
+    document.getElementById('catalogLevelWrap').style.display = type === 'grade' ? '' : 'none';
+    document.getElementById('catalogLevel').value = type === 'grade' ? value : '';
+    document.getElementById('catalogGradeWrap').style.display = ['section','subject'].includes(type) ? '' : 'none';
+    document.getElementById('catalogYearWrap').style.display = type === 'section' ? '' : 'none';
+    document.getElementById('catalogActiveWrap').style.display = type === 'year' ? '' : 'none';
+    document.getElementById('catalogActive').checked = type === 'year' && !!gradeId;
+    const gradeSelect = document.getElementById('catalogGrade');
+    if (gradeId) gradeSelect.value = gradeId;
+    const yearSelect = document.getElementById('catalogYear');
+    if (yearId) yearSelect.value = yearId;
+    document.getElementById('catalogModal').style.display = '';
+}
+function closeCatalogForm() { document.getElementById('catalogModal').style.display = 'none'; }
+async function saveCatalogRecord() {
+    const type = document.getElementById('catalogType').value;
+    const payload = { type, id: +document.getElementById('catalogId').value, name: document.getElementById('catalogName').value.trim() };
+    if (type === 'grade') payload.level = +document.getElementById('catalogLevel').value;
+    if (['section','subject'].includes(type)) payload.grade_level_id = +document.getElementById('catalogGrade').value;
+    if (type === 'section') payload.school_year_id = +document.getElementById('catalogYear').value;
+    if (type === 'year') payload.active = document.getElementById('catalogActive').checked;
+    const result = await apiPost('api/admin_save_catalog.php', payload);
+    if (result.error) { document.getElementById('catalogError').textContent = result.error; return; }
+    location.reload();
+}
 </script>
+<div id="duplicateAsmtModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeDuplicateAsmtModal()">
+    <div class="modal-box modal-box--wide">
+        <h3 style="color:var(--maroon-dark);margin-bottom:.25rem">Duplicate Assessment</h3>
+        <p class="text-muted" id="duplicateSourceLabel" style="margin-bottom:1rem"></p>
+        <div class="form-row">
+            <div class="form-group"><label>Assessment Type</label><select id="dupType"><option value="summative">Summative Test</option><option value="periodic">Periodic</option><option value="term_exam">Term Exam</option></select></div>
+            <div class="form-group"><label>Total Items</label><input id="dupItems" type="number" min="1" max="200"></div>
+        </div>
+        <div class="form-group"><label>Subject</label><select id="dupSubject"></select></div>
+        <div class="form-group"><label>Term</label><select id="dupTerm"></select></div>
+        <div class="form-row">
+            <div class="form-group" style="flex:3"><label>Title <span class="req">*</span></label><input id="dupTitle" maxlength="200"></div>
+            <div class="form-group"><label>Date Given</label><input id="dupDate" type="date"></div>
+        </div>
+        <p class="text-muted" style="font-size:.85rem">Competency mappings from the original will be copied when they match the selected subject and item count.</p>
+        <p id="duplicateAsmtError" class="text-muted" role="alert"></p>
+        <div class="form-actions"><button id="btnDuplicateAsmt" class="btn btn-primary" onclick="saveDuplicatedAssessment()">Create Duplicate</button><button class="btn btn-outline-secondary" onclick="closeDuplicateAsmtModal()">Cancel</button></div>
+    </div>
+</div>
 <!-- ============================================================
      MODAL: RESET TEACHER PASSWORD
 ============================================================ -->
@@ -842,7 +901,7 @@ const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
             <p style="font-size:.875rem;color:var(--c-muted);margin-top:.35rem">
                 Username: <code id="resetTeacherUsername"></code>
             </p>
-            <div style="background:rgba(199,154,58,.12);border:2px solid var(--gold);border-radius:.5rem;padding:.75rem 1rem;margin-top:.9rem">
+            <div style="background:rgba(255,193,7,.12);border:2px solid #ffc107;border-radius:.5rem;padding:.75rem 1rem;margin-top:.9rem">
                 <p style="margin:0 0 .35rem;font-weight:600;color:var(--maroon-dark)">&#9888; Warning</p>
                 <ul style="margin:0;padding-left:1.2rem;font-size:.875rem;line-height:1.7">
                     <li>The teacher's password will be reset to the default: <strong>ilovejacobo</strong></li>
@@ -851,7 +910,7 @@ const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
                 </ul>
             </div>
             <div style="display:flex;gap:.75rem;margin-top:1.5rem;justify-content:flex-end">
-                <button class="btn btn-outline" onclick="closeResetModal()">Cancel</button>
+                <button class="btn btn-outline-secondary" onclick="closeResetModal()">Cancel</button>
                 <button class="btn btn-primary" id="btnDoReset" onclick="confirmReset()">Generate Password</button>
             </div>
         </div>
@@ -859,7 +918,7 @@ const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
         <!-- Step 2: show temp password once -->
         <div id="resetResultState" style="display:none">
             <p>Temporary password for <strong id="resetResultName"></strong>:</p>
-            <div style="background:rgba(199,154,58,.1);border:2.5px solid var(--gold);border-radius:.5rem;padding:1rem 1.5rem;text-align:center;margin:1rem 0">
+            <div style="background:rgba(13,110,253,.08);border:2px solid #0d6efd;border-radius:.5rem;padding:1rem 1.5rem;text-align:center;margin:1rem 0">
                 <code id="resetTempPwd" style="font-size:1.6rem;letter-spacing:.14em;color:var(--maroon-dark);font-weight:700;user-select:all"></code>
             </div>
             <p style="font-size:.8rem;color:var(--c-muted)">
@@ -868,7 +927,7 @@ const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
             </p>
             <div style="display:flex;gap:.75rem;margin-top:1.25rem;justify-content:flex-end;align-items:center">
                 <span id="resetCopyMsg" style="color:green;font-size:.875rem;display:none">&#10003; Copied!</span>
-                <button class="btn btn-outline" onclick="copyTempPwd()">Copy Password</button>
+                <button class="btn btn-outline-secondary" onclick="copyTempPwd()">Copy Password</button>
                 <button class="btn btn-primary" onclick="closeResetModal()">Done</button>
             </div>
         </div>
@@ -893,14 +952,43 @@ const AVAILABLE_GRADE_LEVELS_LIST = <?= json_encode(AVAILABLE_GRADE_LEVELS) ?>;
             <label>Subject(s) Taught <span class="req">*</span></label>
             <div class="checklist checklist--grid" id="editSubjectChecklist"></div>
         </div>
+        <div class="form-group" style="margin-top:.9rem">
+            <label for="editTeacherAssignmentYear">School Year for Section Assignments</label>
+            <select id="editTeacherAssignmentYear" onchange="renderEditTeacherSectionAssignments()"><?php foreach ($settingsYears as $year): ?><option value="<?= (int)$year['id'] ?>" <?= !empty($year['is_active']) ? 'selected' : '' ?>><?= h($year['name']) ?><?= !empty($year['is_active']) ? ' (Active)' : '' ?></option><?php endforeach; ?></select>
+        </div>
+        <div class="form-group"><label>Section(s) by Subject</label><div id="editTeacherSectionAssignments" class="checklist" style="max-height:240px;overflow:auto"><span class="text-muted">Loading assignments…</span></div></div>
 
         <div style="display:flex;gap:.75rem;margin-top:1.5rem;justify-content:flex-end">
-            <button class="btn btn-outline" onclick="closeEditTeacherModal()">Cancel</button>
+            <button class="btn btn-outline-secondary" onclick="closeEditTeacherModal()">Cancel</button>
             <button class="btn btn-primary" id="btnSaveTeacherEdit" onclick="saveTeacherEdit()">Save Changes</button>
         </div>
     </div>
 </div>
 
-<script src="<?= asset_url('script.js') ?>"></script>
-</body>
-</html>
+<div id="teacherProfileModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTeacherProfileModal()">
+    <div class="modal-box" style="max-width:620px">
+        <h3 style="color:var(--maroon-dark);margin-bottom:.25rem">Teacher Profile</h3>
+        <p style="font-size:.875rem;color:var(--c-muted);margin-bottom:1rem"><strong id="teacherProfileName"></strong> · <code id="teacherProfileUsername"></code></p>
+        <div class="form-group"><label>Assigned Sections</label><div id="teacherProfileSections" class="text-muted" style="font-size:.9rem">Loading assignments…</div></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:1.25rem"><button class="btn btn-outline-secondary" onclick="closeTeacherProfileModal()">Close</button></div>
+    </div>
+</div>
+
+<div id="teacherAssignmentsModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeTeacherAssignments()">
+    <div class="modal-box" style="max-width:620px">
+        <h3 style="color:var(--maroon-dark);margin-bottom:.25rem">Assign Sections</h3>
+        <p style="font-size:.875rem;color:var(--c-muted);margin-bottom:1rem"><strong id="teacherAssignmentsName"></strong></p>
+        <div class="form-row">
+            <div class="form-group"><label for="teacherAssignmentYear">School Year</label><select id="teacherAssignmentYear" onchange="loadTeacherAssignmentSections()"><?php foreach ($settingsYears as $year): ?><option value="<?= (int)$year['id'] ?>" <?= !empty($year['is_active']) ? 'selected' : '' ?>><?= h($year['name']) ?><?= !empty($year['is_active']) ? ' (Active)' : '' ?></option><?php endforeach; ?></select></div>
+            <div class="form-group"><label for="teacherAssignmentSubject">Subject and Grade</label><select id="teacherAssignmentSubject" onchange="loadTeacherAssignmentSections()"><option value="">Loading…</option></select></div>
+        </div>
+        <p class="text-muted" style="font-size:.85rem">Assigned sections control this teacher’s student imports and answer sheet submissions.</p>
+        <div id="teacherAssignmentChecklist" class="checklist checklist--grid" style="max-height:260px;overflow:auto"><span class="text-muted">Choose a subject to load sections.</span></div>
+        <p id="teacherAssignmentsError" class="text-muted" role="alert"></p>
+        <div class="form-actions"><button class="btn btn-primary" id="btnSaveTeacherAssignments" onclick="saveTeacherAssignments()">Save Section Mapping</button><button class="btn btn-outline-secondary" onclick="closeTeacherAssignments()">Cancel</button></div>
+    </div>
+</div>
+
+<?php
+$layoutFooterScripts = '<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@6.6.0/dist/js/tabulator.min.js"></script><script src="' . asset_url('chartjs-adminlte-theme.js') . '"></script><script src="' . asset_url('script.js') . '"></script><script src="' . asset_url('table-pagination.js') . '"></script><script>const requestedAdminPanel=new URLSearchParams(window.location.search).get("panel");if(requestedAdminPanel){const button=[...document.querySelectorAll(".admin-tab[data-panel]")].find(item=>item.dataset.panel===requestedAdminPanel);if(button)button.click();}</script>';
+require __DIR__ . '/includes/master_layout_end.php';

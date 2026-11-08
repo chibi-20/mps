@@ -33,14 +33,21 @@ $chk = $pdo->prepare("SELECT 1 FROM terms WHERE id = ? AND school_year_id = ?");
 $chk->execute([$termId, $syId]);
 if (!$chk->fetch()) json_response(['error' => 'That term does not belong to the given school year.'], 422);
 
-$pdo->prepare(
-    "INSERT INTO grade_enrollment
+$pdo->prepare(is_sqlite()
+    ? "INSERT INTO grade_enrollment
+        (school_year_id, grade_level, term_id, annual_male, annual_female, monthly_male, monthly_female, updated_by)
+     VALUES (?,?,?,?,?,?,?,?)
+     ON CONFLICT(school_year_id, grade_level, term_id) DO UPDATE SET
+        annual_male = excluded.annual_male, annual_female = excluded.annual_female,
+        monthly_male = excluded.monthly_male, monthly_female = excluded.monthly_female,
+        updated_by = excluded.updated_by, updated_at = CURRENT_TIMESTAMP"
+    : "INSERT INTO grade_enrollment
         (school_year_id, grade_level, term_id, annual_male, annual_female, monthly_male, monthly_female, updated_by)
      VALUES (?,?,?,?,?,?,?,?)
      ON DUPLICATE KEY UPDATE
         annual_male = VALUES(annual_male), annual_female = VALUES(annual_female),
         monthly_male = VALUES(monthly_male), monthly_female = VALUES(monthly_female),
-        updated_by = VALUES(updated_by), updated_at = NOW()"
-)->execute([$syId, $grade, $termId, $annualMale, $annualFemale, $monthlyMale, $monthlyFemale, $uid]);
+        updated_by = VALUES(updated_by), updated_at = CURRENT_TIMESTAMP")
+->execute([$syId, $grade, $termId, $annualMale, $annualFemale, $monthlyMale, $monthlyFemale, $uid]);
 
 json_response(['success' => true]);

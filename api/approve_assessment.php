@@ -49,7 +49,7 @@ if ($asmt['is_shared']) {
     }
 
     $pdo->prepare(
-        "UPDATE teacher_assessment_encodings SET status=?, remarks=?, updated_at=NOW()
+        "UPDATE teacher_assessment_encodings SET status=?, remarks=?, updated_at=CURRENT_TIMESTAMP
          WHERE assessment_id=? AND teacher_id=?"
     )->execute([$newStatus, $action === 'return' ? $remarks : null, $assessment_id, $teacher_id]);
 } else {
@@ -58,7 +58,7 @@ if ($asmt['is_shared']) {
     }
 
     $pdo->prepare(
-        "UPDATE assessments SET status=?, reviewed_by=?, remarks=?, updated_at=NOW() WHERE id=?"
+        "UPDATE assessments SET status=?, reviewed_by=?, remarks=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
     )->execute([$newStatus, $uid, $action === 'return' ? $remarks : null, $assessment_id]);
 }
 

@@ -43,7 +43,7 @@ try {
     // Close any open reset requests for this teacher (log who handled it)
     $pdo->prepare(
         "UPDATE password_reset_requests
-         SET status = 'done', handled_by = ?, handled_at = NOW()
+         SET status = 'done', handled_by = ?, handled_at = CURRENT_TIMESTAMP
          WHERE user_id = ? AND status = 'pending'"
     )->execute([$adminId, $uid]);
 

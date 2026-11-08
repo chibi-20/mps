@@ -38,18 +38,19 @@ $grade = (int)$gradeStmt->fetchColumn();
 $activeSY = $pdo->query("SELECT id FROM school_years WHERE is_active=1 LIMIT 1")->fetchColumn();
 if (!$activeSY) json_response(['error' => 'No active school year configured.'], 422);
 
-// Requested sections just need to belong to this subject's grade + active school
-// year -- a teacher can pick up any section here, not only ones an admin
-// pre-assigned during registration.
+// Requested sections must be explicitly assigned to this teacher for the subject.
 $ph      = implode(',', array_fill(0, count($sectionIds), '?'));
 $secStmt = $pdo->prepare(
-    "SELECT id FROM sections WHERE id IN ({$ph}) AND grade_level = ? AND school_year_id = ?"
+    "SELECT sec.id FROM sections sec
+     JOIN teacher_assignments ta ON ta.section_id=sec.id AND ta.school_year_id=sec.school_year_id
+     WHERE sec.id IN ({$ph}) AND sec.grade_level=? AND sec.school_year_id=?
+       AND ta.teacher_id=? AND ta.subject_id=?"
 );
-$secStmt->execute([...$sectionIds, $grade, $activeSY]);
+$secStmt->execute([...$sectionIds, $grade, $activeSY, $uid, $subjectId]);
 $requested = array_map('intval', array_column($secStmt->fetchAll(), 'id'));
 
-if (empty($requested)) {
-    json_response(['error' => "None of the selected sections belong to this subject's grade level."], 422);
+if (count($requested) !== count($sectionIds)) {
+    json_response(['error' => 'One or more selected sections are not assigned to you for this subject and school year.'], 403);
 }
 
 // Sections this teacher currently has active on THIS assessment specifically
@@ -105,21 +106,19 @@ $actualRemove   = array_values(array_diff($ownRemoveCandidates, $blockedForData)
 $pdo->beginTransaction();
 try {
     // Insert or touch tae row
-    $pdo->prepare(
-        "INSERT INTO teacher_assessment_encodings (assessment_id, teacher_id, status)
+    $pdo->prepare(is_sqlite()
+        ? "INSERT INTO teacher_assessment_encodings (assessment_id, teacher_id, status)
+         VALUES (?,?,'draft') ON CONFLICT(assessment_id, teacher_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP"
+        : "INSERT INTO teacher_assessment_encodings (assessment_id, teacher_id, status)
          VALUES (?,?,'draft')
-         ON DUPLICATE KEY UPDATE updated_at = NOW()"
-    )->execute([$assessmentId, $uid]);
+         ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP")->execute([$assessmentId, $uid]);
 
-    // Add: make sure the teacher is on record as assigned to the section
-    // (needed for every downstream ownership check), then attach it here.
+    // Add the explicitly assigned sections to this assessment.
     if (!empty($toAdd)) {
-        $taIns = $pdo->prepare(
-            "INSERT IGNORE INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id) VALUES (?,?,?,?)"
-        );
-        $asIns = $pdo->prepare("INSERT IGNORE INTO assessment_sections (assessment_id, section_id) VALUES (?,?)");
+        $asIns = $pdo->prepare(is_sqlite()
+            ? "INSERT OR IGNORE INTO assessment_sections (assessment_id, section_id) VALUES (?,?)"
+            : "INSERT IGNORE INTO assessment_sections (assessment_id, section_id) VALUES (?,?)");
         foreach ($toAdd as $sid) {
-            $taIns->execute([$uid, $subjectId, $sid, $activeSY]);
             $asIns->execute([$assessmentId, $sid]);
         }
     }

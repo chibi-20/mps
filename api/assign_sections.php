@@ -12,28 +12,39 @@ verify_csrf();
 $raw        = json_decode(file_get_contents('php://input'), true) ?? [];
 $teacher_id = validate_int($raw['teacher_id'] ?? null, 1);
 $subject_id = validate_int($raw['subject_id'] ?? null, 1);
+$school_year_id = validate_int($raw['school_year_id'] ?? null, 1);
 $section_ids = array_values(array_unique(array_filter(
     array_map('intval', (array)($raw['section_ids'] ?? [])),
     fn($id) => $id > 0
 )));
 
-if (!$teacher_id || !$subject_id) {
-    json_response(['error' => 'teacher_id and subject_id are required.'], 422);
+if (!$teacher_id || !$subject_id || !$school_year_id) {
+    json_response(['error' => 'teacher_id, subject_id, and school_year_id are required.'], 422);
 }
 
 $pdo = get_pdo();
 
 // Verify subject exists + get grade_level
-$subjStmt = $pdo->prepare("SELECT grade_level FROM subjects WHERE id = ?");
+$subjStmt = $pdo->prepare("SELECT name, grade_level FROM subjects WHERE id = ?");
 $subjStmt->execute([$subject_id]);
 $subjRow = $subjStmt->fetch();
 if (!$subjRow) json_response(['error' => 'Subject not found.'], 404);
 $grade = (int)$subjRow['grade_level'];
 
-// Active school year
-$sy = $pdo->query("SELECT id FROM school_years WHERE is_active=1 LIMIT 1")->fetch();
-$syId = $sy ? (int)$sy['id'] : 0;
-if (!$syId) json_response(['error' => 'No active school year found.'], 422);
+$teacherStmt = $pdo->prepare("SELECT id FROM users WHERE id=? AND role='teacher'");
+$teacherStmt->execute([$teacher_id]);
+if (!$teacherStmt->fetch()) json_response(['error' => 'Teacher not found.'], 404);
+$yearStmt = $pdo->prepare('SELECT id FROM school_years WHERE id=?');
+$yearStmt->execute([$school_year_id]);
+if (!$yearStmt->fetch()) json_response(['error' => 'School year not found.'], 404);
+
+$profileStmt = $pdo->prepare(
+    "SELECT 1 FROM user_subjects us
+     JOIN user_grade_levels ugl ON ugl.user_id=us.user_id AND ugl.grade_level=?
+     WHERE us.user_id=? AND LOWER(TRIM(us.subject_name))=LOWER(TRIM(?))"
+);
+$profileStmt->execute([$grade, $teacher_id, $subjRow['name'] ?? '']);
+if (!$profileStmt->fetchColumn()) json_response(['error' => 'Subject and grade are not in the teacher profile.'], 422);
 
 // Validate section_ids belong to the correct grade
 $allowedIds = [];
@@ -42,21 +53,24 @@ if (!empty($section_ids)) {
     $secChk = $pdo->prepare(
         "SELECT id FROM sections WHERE id IN ({$placeholders}) AND grade_level = ? AND school_year_id = ?"
     );
-    $secChk->execute([...$section_ids, $grade, $syId]);
+    $secChk->execute([...$section_ids, $grade, $school_year_id]);
     $allowedIds = array_column($secChk->fetchAll(), 'id');
+    if (count($allowedIds) !== count($section_ids)) {
+        json_response(['error' => 'One or more sections do not match this subject grade and school year.'], 422);
+    }
 }
 
 $pdo->beginTransaction();
 try {
     $pdo->prepare(
         "DELETE FROM teacher_assignments WHERE teacher_id=? AND subject_id=? AND school_year_id=?"
-    )->execute([$teacher_id, $subject_id, $syId]);
+    )->execute([$teacher_id, $subject_id, $school_year_id]);
 
     $insStmt = $pdo->prepare(
         "INSERT INTO teacher_assignments (teacher_id, subject_id, section_id, school_year_id) VALUES (?,?,?,?)"
     );
     foreach ($allowedIds as $sid) {
-        $insStmt->execute([$teacher_id, $subject_id, (int)$sid, $syId]);
+        $insStmt->execute([$teacher_id, $subject_id, (int)$sid, $school_year_id]);
     }
 
     $pdo->commit();

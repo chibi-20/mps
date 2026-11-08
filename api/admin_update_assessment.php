@@ -86,7 +86,7 @@ $itemCompMap = is_array($raw['item_competency_map'] ?? null)
 $pdo->beginTransaction();
 try {
     $pdo->prepare(
-        "UPDATE assessments SET title=?, term_id=?, type=?, total_items=?, date_given=?, updated_at=NOW() WHERE id=?"
+        "UPDATE assessments SET title=?, term_id=?, type=?, total_items=?, date_given=?, updated_at=CURRENT_TIMESTAMP WHERE id=?"
     )->execute([$title, $termId, $type, $totalItems, $dateGiven, $assessment_id]);
 
     // Atomically replace competency map

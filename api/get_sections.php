@@ -34,13 +34,14 @@ $grade = (int)$row['grade_level'];
 $sy   = $pdo->query("SELECT id FROM school_years WHERE is_active=1 LIMIT 1")->fetch();
 $syId = $sy ? (int)$sy['id'] : 0;
 
-// All sections for this grade + school year
+// Only sections explicitly mapped to this teacher for this subject + school year.
 $secStmt = $pdo->prepare(
-    "SELECT id, name FROM sections
-     WHERE grade_level = ? AND school_year_id = ?
-     ORDER BY name"
+    "SELECT sec.id, sec.name FROM sections sec
+     JOIN teacher_assignments ta ON ta.section_id=sec.id AND ta.school_year_id=sec.school_year_id
+     WHERE ta.teacher_id=? AND ta.subject_id=? AND sec.grade_level=? AND sec.school_year_id=?
+     ORDER BY sec.name"
 );
-$secStmt->execute([$grade, $syId]);
+$secStmt->execute([$uid, $subject_id, $grade, $syId]);
 $sections = $secStmt->fetchAll();
 
 $checked = [];

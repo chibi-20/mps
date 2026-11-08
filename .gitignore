@@ -1,6 +1,9 @@
 node_modules/
 dist/
+scanner/
 .env
+data/*.sqlite
+data/*.sqlite-*
 *.tsbuildinfo
 
 tests/*.png

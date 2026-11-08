@@ -60,18 +60,26 @@ if ($isShared) {
     );
     $vStmt->execute([$asmt['subject_id'], $assessment_id, $uid, $activeSY ?: 0]);
 } else {
-    $vStmt = $pdo->prepare("SELECT section_id FROM assessment_sections WHERE assessment_id = ?");
-    $vStmt->execute([$assessment_id]);
+    $vStmt = $pdo->prepare(
+        "SELECT ass.section_id FROM assessment_sections ass
+         JOIN assessments a ON a.id=ass.assessment_id
+         JOIN terms t ON t.id=a.term_id
+         JOIN teacher_assignments ta ON ta.subject_id=a.subject_id
+           AND ta.section_id=ass.section_id AND ta.school_year_id=t.school_year_id
+         WHERE ass.assessment_id=? AND ta.teacher_id=?"
+    );
+    $vStmt->execute([$assessment_id, $uid]);
 }
 $allowedSecIds = array_column($vStmt->fetchAll(), 'section_id');
 
 $pdo->beginTransaction();
 try {
-    $sfStmt = $pdo->prepare(
-        "INSERT INTO score_frequencies (assessment_id, section_id, score, frequency)
+    $sfStmt = $pdo->prepare(is_sqlite()
+        ? "INSERT INTO score_frequencies (assessment_id, section_id, score, frequency)
+         VALUES (?,?,?,?) ON CONFLICT(assessment_id, section_id, score) DO UPDATE SET frequency = excluded.frequency"
+        : "INSERT INTO score_frequencies (assessment_id, section_id, score, frequency)
          VALUES (?,?,?,?)
-         ON DUPLICATE KEY UPDATE frequency = VALUES(frequency)"
-    );
+         ON DUPLICATE KEY UPDATE frequency = VALUES(frequency)");
     foreach ($sfData as $secId => $scores) {
         $secId = (int)$secId;
         if (!in_array($secId, $allowedSecIds, true)) continue;
@@ -83,11 +91,12 @@ try {
         }
     }
 
-    $iccStmt = $pdo->prepare(
-        "INSERT INTO item_correct_counts (assessment_id, section_id, item_no, correct_count)
+    $iccStmt = $pdo->prepare(is_sqlite()
+        ? "INSERT INTO item_correct_counts (assessment_id, section_id, item_no, correct_count)
+         VALUES (?,?,?,?) ON CONFLICT(assessment_id, section_id, item_no) DO UPDATE SET correct_count = excluded.correct_count"
+        : "INSERT INTO item_correct_counts (assessment_id, section_id, item_no, correct_count)
          VALUES (?,?,?,?)
-         ON DUPLICATE KEY UPDATE correct_count = VALUES(correct_count)"
-    );
+         ON DUPLICATE KEY UPDATE correct_count = VALUES(correct_count)");
     foreach ($iccData as $secId => $items) {
         $secId = (int)$secId;
         if (!in_array($secId, $allowedSecIds, true)) continue;
@@ -103,10 +112,10 @@ try {
 
     if ($isShared) {
         $pdo->prepare(
-            "UPDATE teacher_assessment_encodings SET status=?, updated_at=NOW() WHERE assessment_id=? AND teacher_id=?"
+            "UPDATE teacher_assessment_encodings SET status=?, updated_at=CURRENT_TIMESTAMP WHERE assessment_id=? AND teacher_id=?"
         )->execute([$newStatus, $assessment_id, $uid]);
     } else {
-        $pdo->prepare("UPDATE assessments SET status=?, updated_at=NOW() WHERE id=?")
+        $pdo->prepare("UPDATE assessments SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
             ->execute([$newStatus, $assessment_id]);
     }
 

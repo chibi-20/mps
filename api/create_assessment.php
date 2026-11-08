@@ -47,15 +47,23 @@ if (!$subjRow) {
 }
 $grade = (int)$subjRow['grade_level'];
 
-// Validate all submitted section_ids belong to this subject's grade
+$termStmt = $pdo->prepare('SELECT school_year_id FROM terms WHERE id=?');
+$termStmt->execute([$term_id]);
+$schoolYearId = (int)$termStmt->fetchColumn();
+if (!$schoolYearId) json_response(['error' => 'Term not found.'], 404);
+
+// Validate section IDs against both the grade and the teacher's standing assignment.
 $placeholders = implode(',', array_fill(0, count($section_ids), '?'));
 $secChk = $pdo->prepare(
-    "SELECT id FROM sections WHERE id IN ({$placeholders}) AND grade_level = ?"
+    "SELECT sec.id FROM sections sec
+     JOIN teacher_assignments ta ON ta.section_id=sec.id AND ta.school_year_id=sec.school_year_id
+     WHERE sec.id IN ({$placeholders}) AND sec.grade_level=? AND sec.school_year_id=?
+       AND ta.teacher_id=? AND ta.subject_id=?"
 );
-$secChk->execute([...$section_ids, $grade]);
+$secChk->execute([...$section_ids, $grade, $schoolYearId, $uid, $subject_id]);
 $validSecIds = array_column($secChk->fetchAll(), 'id');
 if (count($validSecIds) !== count($section_ids)) {
-    json_response(['error' => 'One or more sections do not belong to this grade level.'], 422);
+    json_response(['error' => 'One or more sections are not assigned to you for this subject and school year.'], 403);
 }
 
 // Clean date

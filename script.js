@@ -7,10 +7,14 @@
 'use strict';
 
 // ============================================================
-// Brand palette (Chart.js needs literal color strings — single
-// source of truth here instead of hex scattered per chart)
+// AdminLTE palette (Chart.js needs literal color strings)
 // ============================================================
-const THEME = { maroon: '#6E1423', maroonDark: '#4A0E18', gold: '#C79A3A', goldLight: '#E6C767' };
+const THEME = { maroon: '#1d4ed8', maroonDark: '#1e40af', gold: '#f59e0b', goldLight: '#fbbf24' };
+function masteryColor(pct) {
+    if (+pct < 50) return '#ef4444';
+    if (+pct < 75) return '#f59e0b';
+    return '#10b981';
+}
 
 // ============================================================
 // Shared helpers
@@ -35,13 +39,13 @@ function scoreBand(pct) {
 
 const SCORE_BAND_ORDER  = ['98-100','95-97','90-94','85-89','80-84','75-79','Below 75'];
 const SCORE_BAND_COLORS = {
-    '98-100':   '#1b4332',
-    '95-97':    '#2d6a4f',
-    '90-94':    '#40916c',
-    '85-89':    '#52b788',
-    '80-84':    '#74c69d',
-    '75-79':    '#b7e4c7',
-    'Below 75': '#e55934',
+    '98-100':   '#065f46',
+    '95-97':    '#047857',
+    '90-94':    '#059669',
+    '85-89':    '#10b981',
+    '80-84':    '#34d399',
+    '75-79':    '#6ee7b7',
+    'Below 75': '#ef4444',
 };
 
 function bandForScore(score, totalItems) {
@@ -82,7 +86,7 @@ function showToast(msg, type = 'success') {
     Object.assign(t.style, {
         position:'fixed', bottom:'24px', right:'24px', zIndex:9999,
         padding:'.75rem 1.25rem', borderRadius:'8px',
-        background: type === 'success' ? '#2d6a4f' : '#c0392b',
+        background: type === 'success' ? '#10b981' : '#ef4444',
         color:'#fff', fontWeight:600, fontSize:'.9rem',
         boxShadow:'0 4px 16px rgba(0,0,0,.2)',
     });
@@ -95,13 +99,19 @@ function showToast(msg, type = 'success') {
 // ============================================================
 
 let currentAssessment = null; // full assessment object loaded from API
+let currentAssessmentId = null;
+let miniChart = null;
+const assessmentHeaderObservers = new WeakMap();
 let mpsSecCases = {};         // {sec_id: Σf}    — updated by recomputeMps; shared with item table
 let mpsSecFx    = {};         // {sec_id: Σf(x)} — used as cross-check in Item Analysis
 
 function toggleNewForm(show) {
-    document.getElementById('newAssessmentPanel').style.display = show ? 'block' : 'none';
-    document.getElementById('emptyState').style.display = show ? 'none' : 'block';
-    document.getElementById('assessmentDetail').style.display = 'none';
+    const panel = document.getElementById('newAssessmentPanel');
+    if (panel) panel.style.display = show ? 'block' : 'none';
+    const emptyState = document.getElementById('emptyState');
+    if (emptyState) emptyState.style.display = show ? 'none' : 'block';
+    const detail = document.getElementById('assessmentDetail');
+    if (detail) detail.style.display = 'none';
 }
 
 // ============================================================
@@ -165,7 +175,7 @@ function updateSectionHint() {
 // Attach new-assessment form
 const frmNew = document.getElementById('frmNewAssessment');
 if (frmNew) {
-    document.getElementById('btnNewAssessment')?.addEventListener('click', () => toggleNewForm(true));
+    document.getElementById('btnNewAssessmentForm')?.addEventListener('click', () => toggleNewForm(true));
 
     // Load sections when subject changes
     const selSubject = document.getElementById('selSubject');
@@ -205,8 +215,13 @@ async function deleteAssessment(id, title, event) {
     const result = await apiPost('api/delete_assessment.php', { assessment_id: id });
     if (result.error) { showToast(result.error, 'error'); return; }
 
-    // Remove the card from the sidebar
-    document.querySelector(`.assessment-item[data-id="${id}"]`)?.remove();
+    // Remove the card from the My Assessments page.
+    document.querySelector(`.teacher-assessment-row[data-id="${id}"]`)?.remove();
+    const assessmentList = document.getElementById('assessmentList');
+    if (assessmentList && !assessmentList.querySelector('.teacher-assessment-row')) {
+        const tbody = assessmentList.querySelector('tbody');
+        if (tbody) tbody.innerHTML = '<tr class="teacher-assessment-empty"><td colspan="8" class="text-center text-muted py-4">No assessments yet. Click <strong>+ New Assessment</strong> to start.</td></tr>';
+    }
 
     // If this assessment's grid was open, reset the main area
     if (currentAssessmentId === id) {
@@ -328,8 +343,8 @@ function renderImportPreview(p) {
         flaggedHtml = `
             <div class="import-flagged">
                 <strong>⚠ ${p.flagged_rows} flagged row(s) — included in import</strong>
-                <div class="table-scroll" style="max-height:130px;margin-top:.4rem">
-                    <table class="data-table" style="font-size:.8rem">
+                <div class="table-scroll table-responsive" style="max-height:130px;margin-top:.4rem">
+                    <table class="data-table table align-middle" style="font-size:.8rem">
                         <thead><tr><th>CSV Line</th><th>Score</th><th>Issue</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
@@ -414,64 +429,123 @@ function updateSubmitState() {
 }
 
 async function loadAssessment(id) {
-    // Mark active in sidebar
-    document.querySelectorAll('.assessment-item').forEach(el => {
-        el.classList.toggle('active', +el.dataset.id === +id);
-    });
-
-    document.getElementById('newAssessmentPanel').style.display = 'none';
+    const selectorPanel = document.getElementById('newAssessmentPanel');
+    if (selectorPanel) selectorPanel.style.display = 'none';
     document.getElementById('emptyState').style.display = 'none';
     document.getElementById('assessmentDetail').style.display = 'block';
-    document.getElementById('mpsTable').innerHTML = '<tr><td>Loading…</td></tr>';
-    document.getElementById('itemTable').innerHTML = '<tr><td>Loading…</td></tr>';
+    document.getElementById('mpsTable').innerHTML = '<tbody><tr><td colspan="100">Loading assessment data…</td></tr></tbody>';
+    document.getElementById('itemTable').innerHTML = '<tbody><tr><td colspan="100">Loading assessment data…</td></tr></tbody>';
 
-    const data = await apiGet(`api/get_assessment_data.php?id=${id}`);
-    if (data.error) { showToast(data.error, 'error'); return; }
+    try {
+        const data = await apiGet(`api/get_assessment_data.php?id=${encodeURIComponent(id)}`);
+        if (data.error) throw new Error(data.error);
+        if (!data.assessment || !Array.isArray(data.sections)) {
+            throw new Error('The server returned incomplete assessment data. Please refresh and try again.');
+        }
 
-    currentAssessment = data;
-    currentAssessmentId = id;
+        currentAssessment = data;
+        currentAssessmentId = Number(id);
 
-    // Seed mpsSecCases / mpsSecFx from saved DB data.
-    // recomputeMps() will override these with live input values for unlocked assessments.
-    const sfInit = data.score_frequencies;
-    data.sections.forEach(sec => {
-        let cases = 0, fx = 0;
-        Object.entries(sfInit[sec.id] || {}).forEach(([score, freq]) => {
-            cases += +freq;
-            fx    += +freq * +score;
+        // Seed mpsSecCases / mpsSecFx from saved DB data.
+        // recomputeMps() will override these with live input values for unlocked assessments.
+        const sfInit = data.score_frequencies || {};
+        mpsSecCases = {};
+        mpsSecFx = {};
+        data.sections.forEach(sec => {
+            let cases = 0, fx = 0;
+            Object.entries(sfInit[sec.id] || {}).forEach(([score, freq]) => {
+                cases += +freq;
+                fx    += +freq * +score;
+            });
+            mpsSecCases[sec.id] = cases;
+            mpsSecFx[sec.id]    = fx;
         });
-        mpsSecCases[sec.id] = cases;
-        mpsSecFx[sec.id]    = fx;
-    });
 
-    // Update header
-    const a = data.assessment;
-    document.getElementById('detailTitle').textContent = a.title;
-    document.getElementById('detailMeta').textContent =
-        `${a.subject_name} · Grade ${a.grade_level} · Term ${a.term_no} · ${a.total_items} items · ${a.date_given || 'no date'}`;
-    const chip = document.getElementById('detailStatus');
-    chip.textContent = a.status.charAt(0).toUpperCase() + a.status.slice(1);
-    chip.className = 'status-chip status-' + a.status;
+        // Update header
+        const a = data.assessment;
+        document.getElementById('detailTitle').textContent = a.title;
+        document.getElementById('detailMeta').textContent =
+            `${a.subject_name} · Grade ${a.grade_level} · Term ${a.term_no} · ${a.total_items} items · ${a.date_given || 'no date'}`;
+        const chip = document.getElementById('detailStatus');
+        chip.textContent = a.status.charAt(0).toUpperCase() + a.status.slice(1);
+        chip.className = 'status-chip badge status-' + a.status;
 
-    // Export link
-    document.getElementById('btnExport').href = `${BASE_URL}api/export_excel.php?assessment_id=${id}`;
+        // Export link
+        document.getElementById('btnExport').href = `${BASE_URL}api/export_excel.php?assessment_id=${encodeURIComponent(id)}`;
 
-    // Remarks (returned)
-    const ra = document.getElementById('returnedAlert');
-    if (a.status === 'returned' && a.remarks) {
-        ra.style.display = 'block';
-        ra.textContent = 'Returned by admin: ' + a.remarks;
-    } else { ra.style.display = 'none'; }
+        // Remarks (returned)
+        const ra = document.getElementById('returnedAlert');
+        if (a.status === 'returned' && a.remarks) {
+            ra.style.display = 'block';
+            ra.textContent = 'Returned by admin: ' + a.remarks;
+        } else { ra.style.display = 'none'; }
 
-    // Lock buttons if submitted/approved (Submit state is managed by updateSubmitState())
-    const locked = (a.status === 'submitted' || a.status === 'approved');
-    document.getElementById('btnSaveDraft').disabled = locked;
-    const btnImport = document.getElementById('btnImportZipgrade');
-    if (btnImport) btnImport.style.display = locked ? 'none' : '';
+        // Lock buttons if submitted/approved (Submit state is managed by updateSubmitState())
+        const locked = (a.status === 'submitted' || a.status === 'approved');
+        document.getElementById('btnSaveDraft').disabled = locked;
+        const btnImport = document.getElementById('btnImportZipgrade');
+        if (btnImport) btnImport.style.display = locked ? 'none' : '';
 
-    buildMpsTable(data);
-    buildItemTable(data);
-    buildMiniChart(data);
+        buildMpsTable(data);
+        buildItemTable(data);
+        buildMiniChart(data);
+    } catch (err) {
+        currentAssessment = null;
+        const message = err instanceof Error ? err.message : 'An unexpected error occurred.';
+        ['mpsTable', 'itemTable'].forEach(id => {
+            const table = document.getElementById(id);
+            table.innerHTML = '';
+            const body = table.createTBody();
+            const row = body.insertRow();
+            const cell = row.insertCell();
+            cell.colSpan = 100;
+            cell.className = 'text-danger';
+            cell.textContent = `Could not load assessment data: ${message}`;
+        });
+        showToast(`Could not load assessment: ${message}`, 'error');
+    }
+}
+
+function backToMyAssessments() {
+    document.getElementById('assessmentDetail').style.display = 'none';
+    const selectorPanel = document.getElementById('newAssessmentPanel');
+    if (selectorPanel) selectorPanel.style.display = 'none';
+    document.getElementById('emptyState').style.display = 'block';
+    currentAssessment = null;
+    currentAssessmentId = null;
+    mpsSecCases = {};
+    mpsSecFx = {};
+    if (miniChart) {
+        miniChart.destroy();
+        miniChart = null;
+    }
+}
+
+function freezeAssessmentHeaderRows(table) {
+    const rows = table?.tHead?.rows;
+    if (!rows || rows.length < 2) return;
+
+    assessmentHeaderObservers.get(table)?.disconnect();
+    const updateOffsets = () => {
+        const firstRowHeight = rows[0].getBoundingClientRect().height;
+        Array.from(rows[0].cells).forEach(cell => {
+            cell.style.position = 'sticky';
+            cell.style.top = '0px';
+            cell.style.zIndex = '4';
+        });
+        Array.from(rows[1].cells).forEach(cell => {
+            cell.style.position = 'sticky';
+            cell.style.top = `${firstRowHeight}px`;
+            cell.style.zIndex = '3';
+        });
+    };
+    updateOffsets();
+
+    if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(updateOffsets);
+        observer.observe(rows[0]);
+        assessmentHeaderObservers.set(table, observer);
+    }
 }
 
 // ---- MPS TABLE ----
@@ -510,7 +584,7 @@ function buildMpsTable(data) {
     r1.appendChild(scTH);
     sections.forEach(s => {
         const th = document.createElement('th');
-        th.colSpan = 2; th.textContent = s.name;
+        th.colSpan = 2; th.textContent = s.name; th.classList.add('section-group-start');
         r1.appendChild(th);
     });
     const totTH = document.createElement('th');
@@ -518,7 +592,10 @@ function buildMpsTable(data) {
     r1.appendChild(totTH);
 
     const r2 = thead2.insertRow();
-    sections.forEach(() => { addTH(r2,'f'); addTH(r2,'f(x)'); });
+    sections.forEach(() => {
+        addTH(r2, 'f').classList.add('section-group-start');
+        addTH(r2, 'f(x)');
+    });
     addTH(r2,'f'); addTH(r2,'f(x)');
 
     // Body: rows from totalItems down to 0
@@ -532,6 +609,7 @@ function buildMpsTable(data) {
         sections.forEach((sec, secIdx) => {
             const savedF = sf[sec.id]?.[score] ?? 0;
             const cellF  = tr.insertCell();
+            cellF.classList.add('section-group-start');
             if (locked) {
                 cellF.textContent = savedF || '';
             } else {
@@ -565,7 +643,8 @@ function buildMpsTable(data) {
         tr.className = 'summary-row';
         const td = tr.insertCell(); td.textContent = lbl; td.className = 'row-label';
         sections.forEach(sec => {
-            tr.insertCell().className = `sum-${lbl.split(' ')[0].toLowerCase()}-${sec.id}`;
+            const fCell = tr.insertCell();
+            fCell.className = `sum-${lbl.split(' ')[0].toLowerCase()}-${sec.id} section-group-start`;
             const fxPH = tr.insertCell();
             // Σf(x) shown beside CASES in the f(x) column
             if (lbl === 'CASES') fxPH.className = `sum-fx-${sec.id}`;
@@ -582,7 +661,7 @@ function buildMpsTable(data) {
         td.textContent = `${bk} — ${MASTERY_BANDS[bk].label} (${MASTERY_BANDS[bk].min}–${MASTERY_BANDS[bk].max}%)`;
         td.colSpan = 1; td.className = 'row-label';
         sections.forEach(sec => {
-            const c1 = tr.insertCell(); c1.className = `band-${bk}-${sec.id}`;
+            const c1 = tr.insertCell(); c1.className = `band-${bk}-${sec.id} section-group-start`;
             const c2 = tr.insertCell(); c2.className = `bandpct-${bk}-${sec.id}`;
         });
         tr.insertCell().className = 'total-col';
@@ -597,7 +676,7 @@ function buildMpsTable(data) {
         td.textContent = `${PROFICIENCY_LEVELS[pk].label} (${PROFICIENCY_LEVELS[pk].min}–${PROFICIENCY_LEVELS[pk].max}%)`;
         td.colSpan = 1; td.className = 'row-label';
         sections.forEach(sec => {
-            const c1 = tr.insertCell(); c1.className = `pl-${pk}-${sec.id}`;
+            const c1 = tr.insertCell(); c1.className = `pl-${pk}-${sec.id} section-group-start`;
             const c2 = tr.insertCell(); c2.className = `plpct-${pk}-${sec.id}`;
         });
         tr.insertCell().className = 'total-col';
@@ -609,13 +688,14 @@ function buildMpsTable(data) {
     ntr.className = 'summary-row';
     const ntd = ntr.insertCell(); ntd.textContent = `NPWRM (≥${MASTERY_THRESHOLD}%)`; ntd.className = 'row-label';
     sections.forEach(sec => {
-        ntr.insertCell().className = `npwrm-${sec.id}`;
+        ntr.insertCell().className = `npwrm-${sec.id} section-group-start`;
         ntr.insertCell();
     });
     ntr.insertCell().className = 'total-col';
     ntr.insertCell().className = 'total-col';
 
     initGridPasteNav(tbl);
+    freezeAssessmentHeaderRows(tbl);
     recomputeMps();
 }
 
@@ -871,10 +951,13 @@ function buildItemTable(data) {
         cTH.style.cssText = 'max-width:140px;font-size:.78rem';
         r1.appendChild(cTH);
     }
-    sections.forEach(s => { const th = document.createElement('th'); th.colSpan=2; th.textContent=s.name; r1.appendChild(th); });
+    sections.forEach(s => { const th = document.createElement('th'); th.colSpan=2; th.textContent=s.name; th.classList.add('section-group-start'); r1.appendChild(th); });
     const totTH2 = document.createElement('th'); totTH2.colSpan=2; totTH2.textContent='TOTAL'; r1.appendChild(totTH2);
     const r2 = thead.insertRow();
-    sections.forEach(() => { addTH(r2,'f'); addTH(r2,'%'); });
+    sections.forEach(() => {
+        addTH(r2, 'f').classList.add('section-group-start');
+        addTH(r2, '%');
+    });
     addTH(r2,'f'); addTH(r2,'%');
 
     const tbody = tbl.createTBody();
@@ -901,6 +984,7 @@ function buildItemTable(data) {
             const savedF = icc[sec.id]?.[item] ?? 0;
             const cases  = mpsSecCases[sec.id] || 0;
             const cellF  = tr.insertCell();
+            cellF.classList.add('section-group-start');
             if (locked) {
                 cellF.textContent = savedF || '';
             } else {
@@ -939,7 +1023,7 @@ function buildItemTable(data) {
     const lblCell = totRow.insertCell(); lblCell.textContent = 'TOTAL'; lblCell.className = 'row-label';
     sections.forEach(sec => {
         const totalCell = totRow.insertCell();
-        totalCell.className = `item-total-${sec.id} total-col`;
+        totalCell.className = `item-total-${sec.id} total-col section-group-start`;
         const checkCell = totRow.insertCell();
         checkCell.className = `item-check-${sec.id} total-col`;
     });
@@ -948,6 +1032,7 @@ function buildItemTable(data) {
     totRow.insertCell().className = 'total-col';
 
     initGridPasteNav(tbl);
+    freezeAssessmentHeaderRows(tbl);
     recomputeItemTotals();
 }
 
@@ -1029,6 +1114,7 @@ function switchTab(tab) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     document.getElementById('tab-mps').style.display  = tab === 'mps'  ? 'block' : 'none';
     document.getElementById('tab-item').style.display = tab === 'item' ? 'block' : 'none';
+    freezeAssessmentHeaderRows(document.getElementById(tab === 'mps' ? 'mpsTable' : 'itemTable'));
 }
 
 // ---- MINI CHART ----
@@ -1051,7 +1137,7 @@ function buildMiniChart(data) {
     });
 
     const ctx = document.getElementById('miniMpsChart');
-    if (!ctx) return;
+    if (!ctx || typeof Chart === 'undefined') return;
     if (miniChart) miniChart.destroy();
     miniChart = new Chart(ctx, {
         type: 'bar',
@@ -1060,7 +1146,7 @@ function buildMiniChart(data) {
             datasets: [{
                 label: 'MPS %',
                 data: values,
-                backgroundColor: values.map(v => v >= 75 ? '#2d9148' : '#e55934'),
+                backgroundColor: values.map(masteryColor),
             }],
         },
         options: {
@@ -1220,7 +1306,7 @@ function buildMpsSubjectChart(data) {
             datasets: [{
                 label: 'MPS %',
                 data:  d.map(r => +r.mps),
-                backgroundColor: d.map(r => +r.mps >= 75 ? '#52b788' : THEME.maroon),
+                backgroundColor: d.map(r => masteryColor(r.mps)),
             }],
         },
         options: {
@@ -1245,7 +1331,7 @@ function buildMpsGradeChart(data) {
             datasets: [{
                 label: 'MPS %',
                 data:  d.map(r => +r.mps),
-                backgroundColor: d.map(r => +r.mps >= 75 ? '#52b788' : THEME.maroon),
+                backgroundColor: d.map(r => masteryColor(r.mps)),
             }],
         },
         options: {
@@ -1384,7 +1470,7 @@ function renderPLDistTable(data) {
         html += `<td>${enr ? enr.annual_total : '<span class="text-muted">—</span>'}</td>`;
         html += `<td>${enr ? enr.monthly_total : '<span class="text-muted">—</span>'}</td>`;
         html += `<td>${g.did_not_take !== null && g.did_not_take !== undefined ? g.did_not_take : '<span class="text-muted">—</span>'}</td>`;
-        html += `<td><button type="button" class="btn btn-sm btn-outline" onclick="openEnrollmentModal(${g.grade_level})">Edit Enrollment</button></td></tr>`;
+        html += `<td><button type="button" class="btn btn-sm btn-outline-secondary" onclick="openEnrollmentModal(${g.grade_level})">Edit Enrollment</button></td></tr>`;
     });
     html += '</tbody>';
     tbl.innerHTML = html;
@@ -1450,7 +1536,7 @@ function buildLeastMasteredChart(data) {
         type: 'bar',
         data: {
             labels: d.map(r => 'Item ' + r.item_no),
-            datasets: [{ label: '% Correct', data: d.map(r => +r.pct), backgroundColor: d.map(r => +r.pct < 50 ? '#e55934' : +r.pct < 75 ? '#f0a500' : '#52b788') }],
+            datasets: [{ label: '% Correct', data: d.map(r => +r.pct), backgroundColor: d.map(r => masteryColor(r.pct)) }],
         },
         options: {
             maintainAspectRatio: false,
@@ -1470,7 +1556,7 @@ function buildMpsTrendChart(data) {
             datasets: [{
                 label: 'Overall MPS %',
                 data:  d.map(r => +r.mps),
-                borderColor: THEME.maroon, fill: false, tension: 0.3,
+                borderColor: THEME.maroon, backgroundColor: '#dbeafe', fill: false, tension: 0.3,
             }],
         },
         options: {
@@ -1511,10 +1597,20 @@ const ASMT_TYPE_LABELS = { summative: 'Summative Test', term_exam: 'Term Exam', 
 async function loadSubmissions() {
     const data = await apiGet('api/get_submissions.php');
     if (!data || data.error) return;
+    const submissionRows = data.submissions || [];
+    const submissionCounts = submissionRows.reduce((counts, row) => {
+        counts[row.status] = (counts[row.status] || 0) + 1;
+        return counts;
+    }, {});
+    const setMetric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+    setMetric('submissionMetricTotal', submissionRows.length);
+    setMetric('submissionMetricApproved', submissionCounts.approved || 0);
+    setMetric('submissionMetricReview', submissionCounts.submitted || 0);
+    setMetric('submissionMetricAttention', (submissionCounts.draft || 0) + (submissionCounts.returned || 0));
     const tbody = document.getElementById('complianceTbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    (data.submissions || []).forEach(row => {
+    submissionRows.forEach(row => {
         const tr = tbody.insertRow();
         tr.dataset.status = row.status;
         tr.dataset.term   = row.term_no;
@@ -1525,7 +1621,7 @@ async function loadSubmissions() {
             <td>${escHtml(row.subject_name)}</td>
             <td>Term ${row.term_no}</td>
             <td>${escHtml(ASMT_TYPE_LABELS[row.type] || row.type)}</td>
-            <td><span class="status-chip status-${row.status}">${row.status}</span></td>
+            <td><span class="status-chip badge status-${row.status}">${row.status}</span></td>
             <td>
                 ${row.status === 'submitted' ? `
                 <button class="btn btn-sm btn-success" onclick="approveAssessment(${row.id},${row.teacher_id ?? 'null'})">Approve</button>
@@ -1587,6 +1683,7 @@ function filterComplianceTable() {
 
     const countEl = document.getElementById('subCompCount');
     if (countEl) countEl.textContent = rows.length ? `${shown} of ${rows.length} shown` : '';
+    window.MpsTablePagination?.refresh();
 }
 
 async function approveAssessment(id, teacherId) {
@@ -1649,6 +1746,15 @@ if (frmReturn) {
 async function loadTeachers() {
     const data = await apiGet('api/get_teachers.php');
     if (!data) return;
+    const allTeachers = [...(data.pending || []), ...(data.active || [])];
+    const subjectCount = new Set(allTeachers.flatMap(teacher =>
+        String(teacher.subjects || '').split(',').map(subject => subject.trim()).filter(subject => subject && subject !== '—')
+    )).size;
+    const setMetric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+    setMetric('teacherMetricActive', (data.active || []).length);
+    setMetric('teacherMetricPending', (data.pending || []).length);
+    setMetric('teacherMetricResets', (data.pending_resets || []).length);
+    setMetric('teacherMetricSubjects', subjectCount);
     renderTeacherTable('pendingTbody', data.pending, true);
     renderTeacherTable('activeTbody',  data.active,  false);
     renderPendingResets(data.pending_resets || []);
@@ -1674,10 +1780,12 @@ function renderTeacherTable(tbodyId, rows, isPending) {
             <td class="text-left">${escHtml(r.subjects)}</td>
             ${isPending ? `<td>${escHtml(r.created_at || '')}</td>` : ''}
             <td style="white-space:nowrap">
-                <button class="btn btn-sm btn-outline" onclick="openEditTeacherModal(${r.id})" style="margin-right:.3rem">Edit</button>
+                <button class="btn btn-sm btn-outline-primary" onclick="openTeacherProfile(${r.id})" style="margin-right:.3rem">Profile</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="openEditTeacherModal(${r.id})" style="margin-right:.3rem">Edit</button>
                 ${isPending
                   ? `<button class="btn btn-sm btn-success" onclick="manageTeacher(${r.id},'approve')">Approve</button>`
-                  : `<button class="btn btn-sm btn-outline"
+                  : `<button class="btn btn-sm btn-outline-secondary" onclick="openTeacherAssignments(${r.id})" style="margin-right:.3rem">Sections</button>
+                     <button class="btn btn-sm btn-outline-secondary"
                          data-tid="${r.id}" data-tname="${escHtml(r.display_name)}" data-tusr="${escHtml(r.username)}"
                          onclick="openResetModal(+this.dataset.tid,this.dataset.tname,this.dataset.tusr)"
                          style="margin-right:.3rem">Reset Pwd</button>
@@ -1691,6 +1799,7 @@ function filterTeacherTable() {
     document.querySelectorAll('#activeTbody tr').forEach(tr => {
         tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
     });
+    window.MpsTablePagination?.refresh();
 }
 
 // ---- Reset Password Modal ----
@@ -1762,7 +1871,7 @@ function renderPendingResets(rows) {
             <td>${escHtml(r.requested_at || '')}</td>
             <td>
                 ${r.user_id
-                    ? `<button class="btn btn-sm btn-outline"
+                    ? `<button class="btn btn-sm btn-outline-secondary"
                            data-tid="${r.user_id}" data-tname="${escHtml(r.display_name)}" data-tusr="${escHtml(r.username_submitted)}"
                            onclick="openResetModal(+this.dataset.tid,this.dataset.tname,this.dataset.tusr)">Reset Now</button>`
                     : `<span class="text-muted" style="font-size:.875rem">Username not found</span>`}
@@ -1780,6 +1889,73 @@ async function manageTeacher(id, action) {
 
 // ---- Edit Teacher (grade levels / subjects) ----
 let _editTeacherId = null;
+const _sectionEditorSelections = new Map();
+
+function sectionEditorKey(prefix, yearId, subjectId) {
+    return `${prefix}:${yearId}:${subjectId}`;
+}
+
+function rememberSectionEditorSelections(prefix) {
+    const root = document.getElementById(prefix + 'SectionAssignments');
+    if (!root) return;
+    root.querySelectorAll('[data-section-assignment-group]').forEach(group => {
+        const key = sectionEditorKey(prefix, group.dataset.yearId, group.dataset.subjectId);
+        _sectionEditorSelections.set(key, [...group.querySelectorAll('input[type="checkbox"]:checked')].map(input => +input.value));
+    });
+}
+
+function renderTeacherSectionAssignments(prefix, grades, subjects, yearId, initialAssignments = []) {
+    rememberSectionEditorSelections(prefix);
+    const root = document.getElementById(prefix + 'SectionAssignments');
+    if (!root) return;
+    const gradeSet = new Set(grades.map(Number));
+    const subjectSet = new Set(subjects.map(subject => String(subject).trim().toLowerCase()));
+    const combinations = SUBJECTS_ALL.filter(subject => gradeSet.has(+subject.grade_level)
+        && subjectSet.has(String(subject.name).trim().toLowerCase()));
+    if (!combinations.length) {
+        root.innerHTML = '<span class="text-muted">Select at least one grade and subject to choose sections.</span>';
+        return;
+    }
+    const year = +yearId;
+    root.innerHTML = combinations.map(subject => {
+        const sections = TEACHER_SECTION_CATALOG.filter(section => +section.school_year_id === year
+            && +section.grade_level === +subject.grade_level);
+        const key = sectionEditorKey(prefix, year, subject.id);
+        const initialIds = initialAssignments.filter(item => +item.school_year_id === year && +item.subject_id === +subject.id)
+            .map(item => +item.section_id);
+        const selectedIds = _sectionEditorSelections.has(key) ? _sectionEditorSelections.get(key) : initialIds;
+        const selected = new Set(selectedIds.map(Number));
+        return `<section class="teacher-section-assignment" data-section-assignment-group data-subject-id="${subject.id}" data-year-id="${year}" style="margin:.35rem 0 .8rem">
+            <strong>${escHtml(subject.name)} · Grade ${subject.grade_level}</strong>
+            <div class="checklist checklist--grid" style="margin-top:.35rem">${sections.length
+                ? sections.map(section => `<label class="check-item"><input type="checkbox" data-subject-id="${subject.id}" data-year-id="${year}" value="${section.id}"${selected.has(+section.id) ? ' checked' : ''}>${escHtml(section.name)}</label>`).join('')
+                : '<span class="text-muted">No sections are configured for this grade and school year.</span>'}</div>
+        </section>`;
+    }).join('');
+}
+
+function readTeacherSectionAssignments(prefix) {
+    const root = document.getElementById(prefix + 'SectionAssignments');
+    if (!root) return [];
+    return [...root.querySelectorAll('[data-section-assignment-group]')].map(group => ({
+        subject_id: +group.dataset.subjectId,
+        school_year_id: +group.dataset.yearId,
+        section_ids: [...group.querySelectorAll('input[type="checkbox"]:checked')].map(input => +input.value),
+    }));
+}
+
+function selectedValues(selector) {
+    return [...document.querySelectorAll(selector + ':checked')].map(input => input.value);
+}
+
+function renderEditTeacherSectionAssignments() {
+    if (!_editTeacherId) return;
+    renderTeacherSectionAssignments('editTeacher',
+        selectedValues('input[name="edit_grade_levels"]').map(Number),
+        selectedValues('input[name="edit_subjects"]'),
+        document.getElementById('editTeacherAssignmentYear').value,
+        window._editTeacherSectionRows || []);
+}
 
 async function openEditTeacherModal(id) {
     const data = await apiGet(`api/get_teacher_profile.php?teacher_id=${id}`);
@@ -1792,18 +1968,130 @@ async function openEditTeacherModal(id) {
     const gradeWrap = document.getElementById('editGradeChecklist');
     gradeWrap.innerHTML = AVAILABLE_GRADE_LEVELS_LIST.map(gl => `
         <label class="check-item">
-            <input type="checkbox" name="edit_grade_levels" value="${gl}"${data.grade_levels.includes(gl) ? ' checked' : ''}>
+            <input type="checkbox" name="edit_grade_levels" value="${gl}" onchange="renderEditTeacherSectionAssignments()"${data.grade_levels.includes(gl) ? ' checked' : ''}>
             Grade ${gl}
         </label>`).join('');
 
     const subjWrap = document.getElementById('editSubjectChecklist');
     subjWrap.innerHTML = AVAILABLE_SUBJECTS_LIST.map(sn => `
         <label class="check-item">
-            <input type="checkbox" name="edit_subjects" value="${escHtml(sn)}"${data.subjects.includes(sn) ? ' checked' : ''}>
+            <input type="checkbox" name="edit_subjects" value="${escHtml(sn)}" onchange="renderEditTeacherSectionAssignments()"${data.subjects.includes(sn) ? ' checked' : ''}>
             ${escHtml(sn)}
         </label>`).join('');
 
+    window._editTeacherSectionRows = data.section_assignments || [];
+    _sectionEditorSelections.clear();
+    document.getElementById('editTeacherAssignmentYear').value = String(ACTIVE_SCHOOL_YEAR_ID);
+    renderEditTeacherSectionAssignments();
     document.getElementById('editTeacherModal').style.display = 'flex';
+}
+
+async function openTeacherProfile(id) {
+    const data = await apiGet(`api/get_teacher_profile.php?teacher_id=${id}`);
+    if (!data || data.error) { showToast(data?.error || 'Could not load teacher profile.', 'error'); return; }
+    document.getElementById('teacherProfileName').textContent = data.display_name;
+    document.getElementById('teacherProfileUsername').textContent = data.username;
+    const sectionWrap = document.getElementById('teacherProfileSections');
+    const assignments = data.section_assignments || [];
+    if (!assignments.length) {
+        sectionWrap.innerHTML = '<span class="text-muted">No sections assigned.</span>';
+    } else {
+        const byYear = new Map();
+        assignments.forEach(item => {
+            const key = item.school_year || 'School year';
+            if (!byYear.has(key)) byYear.set(key, []);
+            byYear.get(key).push(item);
+        });
+        sectionWrap.innerHTML = [...byYear.entries()].map(([year, items]) => `
+            <div style="margin-bottom:.65rem"><strong>${escHtml(year)}</strong>
+                <ul style="margin:.25rem 0 0;padding-left:1.25rem">${items.map(item => `<li>Grade ${Number(item.grade_level)} · ${escHtml(item.section_name)} <span class="text-muted">— ${escHtml(item.subject_name)}</span></li>`).join('')}</ul>
+            </div>`).join('');
+    }
+    document.getElementById('teacherProfileModal').style.display = 'flex';
+}
+
+function closeTeacherProfileModal() {
+    document.getElementById('teacherProfileModal').style.display = 'none';
+}
+
+let _assignmentTeacherId = null;
+let _teacherAssignmentSubjects = [];
+
+async function openTeacherAssignments(id) {
+    _assignmentTeacherId = id;
+    document.getElementById('teacherAssignmentsName').textContent = 'Loading teacher…';
+    document.getElementById('teacherAssignmentsError').textContent = '';
+    document.getElementById('teacherAssignmentChecklist').innerHTML = '<span class="text-muted">Loading subjects…</span>';
+    document.getElementById('teacherAssignmentSubject').innerHTML = '<option value="">Loading…</option>';
+    document.getElementById('teacherAssignmentsModal').style.display = 'flex';
+
+    const profile = await apiGet(`api/get_teacher_profile.php?teacher_id=${id}`);
+    if (profile.error) {
+        document.getElementById('teacherAssignmentsName').textContent = '';
+        document.getElementById('teacherAssignmentChecklist').innerHTML = `<span class="text-muted">${escHtml(profile.error)}</span>`;
+        return;
+    }
+    document.getElementById('teacherAssignmentsName').textContent = profile.display_name;
+    const data = await apiGet(`api/get_teacher_subjects.php?teacher_id=${id}`);
+    if (data.error) {
+        document.getElementById('teacherAssignmentSubject').innerHTML = '<option value="">No subjects</option>';
+        document.getElementById('teacherAssignmentChecklist').innerHTML = `<span class="text-muted">${escHtml(data.error)}</span>`;
+        return;
+    }
+    _teacherAssignmentSubjects = data.subjects || [];
+    const subjectSelect = document.getElementById('teacherAssignmentSubject');
+    subjectSelect.innerHTML = _teacherAssignmentSubjects.length
+        ? _teacherAssignmentSubjects.map(subject => `<option value="${subject.id}">${escHtml(subject.name)} · Grade ${subject.grade_level}</option>`).join('')
+        : '<option value="">No subjects configured for this teacher</option>';
+    if (_teacherAssignmentSubjects.length) await loadTeacherAssignmentSections();
+    else document.getElementById('teacherAssignmentChecklist').innerHTML = '<span class="text-muted">Add grade levels and subjects to this teacher profile first.</span>';
+}
+
+async function loadTeacherAssignmentSections() {
+    const subjectId = +document.getElementById('teacherAssignmentSubject')?.value;
+    const schoolYearId = +document.getElementById('teacherAssignmentYear')?.value;
+    const checklist = document.getElementById('teacherAssignmentChecklist');
+    if (!_assignmentTeacherId || !subjectId || !schoolYearId) {
+        checklist.innerHTML = '<span class="text-muted">Choose a subject and school year.</span>';
+        return;
+    }
+    checklist.innerHTML = '<span class="text-muted">Loading sections…</span>';
+    const data = await apiGet(`api/get_assignment_sections.php?teacher_id=${_assignmentTeacherId}&subject_id=${subjectId}&school_year_id=${schoolYearId}`);
+    if (data.error) {
+        checklist.innerHTML = `<span class="text-muted">${escHtml(data.error)}</span>`;
+        return;
+    }
+    const assigned = new Set(data.assigned || []);
+    checklist.innerHTML = data.sections?.length
+        ? data.sections.map(section => `<label class="check-item"><input type="checkbox" name="teacher_assigned_section" value="${section.id}"${assigned.has(+section.id) ? ' checked' : ''}>${escHtml(section.name)}</label>`).join('')
+        : '<span class="text-muted">No sections are configured for this subject’s grade and school year.</span>';
+}
+
+function closeTeacherAssignments() {
+    document.getElementById('teacherAssignmentsModal').style.display = 'none';
+    _assignmentTeacherId = null;
+}
+
+async function saveTeacherAssignments() {
+    if (!_assignmentTeacherId) return;
+    const button = document.getElementById('btnSaveTeacherAssignments');
+    const section_ids = [...document.querySelectorAll('input[name="teacher_assigned_section"]:checked')].map(cb => +cb.value);
+    button.disabled = true;
+    button.textContent = 'Saving…';
+    const result = await apiPost('api/assign_sections.php', {
+        teacher_id: _assignmentTeacherId,
+        subject_id: +document.getElementById('teacherAssignmentSubject').value,
+        school_year_id: +document.getElementById('teacherAssignmentYear').value,
+        section_ids,
+    });
+    button.disabled = false;
+    button.textContent = 'Save Section Mapping';
+    if (result.error) {
+        document.getElementById('teacherAssignmentsError').textContent = result.error;
+        return;
+    }
+    showToast(`Saved ${result.assigned} section assignment${result.assigned === 1 ? '' : 's'}.`);
+    closeTeacherAssignments();
 }
 
 function closeEditTeacherModal() {
@@ -1823,6 +2111,8 @@ async function saveTeacherEdit() {
     btn.textContent = 'Saving…';
     const r = await apiPost('api/update_teacher_profile.php', {
         teacher_id: _editTeacherId, grade_levels, subjects,
+        school_year_id: +document.getElementById('editTeacherAssignmentYear').value,
+        section_assignments: readTeacherSectionAssignments('editTeacher'),
     });
     btn.disabled = false;
     btn.textContent = 'Save Changes';
@@ -1837,116 +2127,70 @@ function adminTab(btn, panel) {
     document.querySelectorAll('.admin-tab').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     document.querySelectorAll('.admin-panel').forEach(p => p.style.display='none');
-    document.getElementById('panel-'+panel).style.display = 'block';
+    document.getElementById('panel-'+panel).style.display = 'flex';
+    const panelHeadings = {
+        analytics: 'Executive Academic Overview',
+        submissions: 'Submissions Compliance & Tracking',
+        competencies: 'DepEd Learning Competencies (MELCs)',
+        assessments: 'Assessments & Examination Repository',
+        teachers: 'Teacher Accounts & Faculty Roster',
+        settings: 'System Configuration & Master Data',
+    };
+    const heading = panelHeadings[panel];
+    if (heading) {
+        const title = document.getElementById('mpsPageTitle');
+        if (title) title.textContent = heading;
+    }
+    const createAssessmentButton = document.getElementById('headerCreateAssessment');
+    if (createAssessmentButton) createAssessmentButton.style.display = panel === 'assessments' ? '' : 'none';
     if (panel === 'submissions') loadSubmissions();
     if (panel === 'teachers')    loadTeachers();
-    if (panel === 'assignments') initAssignmentsPanel();
     if (panel === 'assessments') loadAdminAssessments();
 }
 
-// ============================================================
-// ADMIN: SECTION ASSIGNMENTS PANEL
-// ============================================================
-
-async function initAssignmentsPanel() {
-    const sel = document.getElementById('assignTeacher');
-    if (!sel || sel.options.length > 1) return; // already populated
-    const data = await apiGet('api/get_teachers.php');
-    if (!data?.active) return;
-    data.active.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t.id;
-        opt.textContent = t.display_name;
-        sel.appendChild(opt);
+function openCreateTeacherModal() {
+    document.getElementById('createTeacherError').textContent = '';
+    ['newTeacherLast','newTeacherFirst','newTeacherMiddle','newTeacherUsername','newTeacherPassword'].forEach(id => {
+        document.getElementById(id).value = '';
     });
+    document.querySelectorAll('input[name="new_teacher_grade"], input[name="new_teacher_subject"]').forEach(input => input.checked = false);
+    document.getElementById('newTeacherAssignmentYear').value = String(ACTIVE_SCHOOL_YEAR_ID);
+    _sectionEditorSelections.clear();
+    renderCreateTeacherSectionAssignments();
+    document.getElementById('createTeacherModal').style.display = '';
 }
-
-async function adminLoadTeacherSubjects(teacherId) {
-    const subjSel = document.getElementById('assignSubject');
-    const wrap    = document.getElementById('assignSectionWrap');
-    subjSel.innerHTML = '<option value="">— select subject —</option>';
-    subjSel.disabled  = true;
-    wrap.style.display = 'none';
-
-    if (!teacherId) return;
-
-    const data = await apiGet(`api/get_teacher_subjects.php?teacher_id=${encodeURIComponent(teacherId)}`);
-    if (data.error || !data.subjects?.length) {
-        subjSel.innerHTML = '<option value="">No subjects registered</option>';
-        return;
-    }
-
-    data.subjects.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s.id;
-        opt.textContent = `${s.name} (Grade ${s.grade_level})`;
-        subjSel.appendChild(opt);
-    });
-    subjSel.disabled = false;
+function closeCreateTeacherModal() {
+    document.getElementById('createTeacherModal').style.display = 'none';
 }
-
-async function adminLoadAssignmentSections() {
-    const teacherId  = document.getElementById('assignTeacher')?.value;
-    const subjectId  = document.getElementById('assignSubject')?.value;
-    const wrap       = document.getElementById('assignSectionWrap');
-    const container  = document.getElementById('assignSectionChecklist');
-    const hint       = document.getElementById('assignSectionHint');
-    wrap.style.display = 'none';
-
-    if (!teacherId || !subjectId) return;
-
-    container.innerHTML = '<p class="text-muted" style="margin:0">Loading…</p>';
-    wrap.style.display  = 'block';
-
-    const data = await apiGet(
-        `api/get_assignment_sections.php?teacher_id=${encodeURIComponent(teacherId)}&subject_id=${encodeURIComponent(subjectId)}`
-    );
-
-    if (data.error) {
-        container.innerHTML = `<p class="alert alert-warning" style="margin:0">${escHtml(data.error)}</p>`;
-        return;
-    }
-    if (!data.sections?.length) {
-        container.innerHTML = `<p class="alert alert-warning" style="margin:0">No sections for Grade ${data.grade}.</p>`;
-        return;
-    }
-
-    const assigned = new Set((data.assigned || []).map(Number));
-    let html = '';
-    data.sections.forEach(sec => {
-        const chk = assigned.has(+sec.id) ? 'checked' : '';
-        html += `<label class="check-item">` +
-                `<input type="checkbox" name="assign_sec" value="${sec.id}" ${chk}>` +
-                `${escHtml(sec.name)}</label>`;
-    });
-    container.innerHTML = html;
-
-    const updateHint = () => {
-        const n = container.querySelectorAll('input:checked').length;
-        const t = container.querySelectorAll('input').length;
-        if (hint) hint.textContent = `— ${n} of ${t} selected`;
+function renderCreateTeacherSectionAssignments() {
+    renderTeacherSectionAssignments('newTeacher',
+        selectedValues('input[name="new_teacher_grade"]').map(Number),
+        selectedValues('input[name="new_teacher_subject"]'),
+        document.getElementById('newTeacherAssignmentYear').value);
+}
+async function createTeacherAccount() {
+    const error = document.getElementById('createTeacherError');
+    const button = document.getElementById('btnCreateTeacher');
+    const payload = {
+        last_name: document.getElementById('newTeacherLast').value.trim(),
+        first_name: document.getElementById('newTeacherFirst').value.trim(),
+        middle_name: document.getElementById('newTeacherMiddle').value.trim(),
+        username: document.getElementById('newTeacherUsername').value.trim(),
+        password: document.getElementById('newTeacherPassword').value,
+        grade_levels: [...document.querySelectorAll('input[name="new_teacher_grade"]:checked')].map(input => +input.value),
+        subjects: [...document.querySelectorAll('input[name="new_teacher_subject"]:checked')].map(input => input.value),
+        section_assignments: readTeacherSectionAssignments('newTeacher'),
     };
-    updateHint();
-    container.querySelectorAll('input').forEach(cb => cb.addEventListener('change', updateHint));
-}
-
-async function adminSaveAssignments() {
-    const teacherId  = document.getElementById('assignTeacher')?.value;
-    const subjectId  = document.getElementById('assignSubject')?.value;
-    const msg        = document.getElementById('assignSaveMsg');
-    if (!teacherId || !subjectId) return;
-
-    const section_ids = [...document.querySelectorAll('#assignSectionChecklist input:checked')]
-        .map(cb => +cb.value);
-
-    const result = await apiPost('api/assign_sections.php', { teacher_id: +teacherId, subject_id: +subjectId, section_ids });
-    if (result.error) {
-        if (msg) { msg.textContent = result.error; msg.style.color = 'var(--error, #c0392b)'; }
-        showToast(result.error, 'error');
-        return;
-    }
-    if (msg) { msg.textContent = `Saved — ${result.assigned} section(s) assigned.`; msg.style.color = 'var(--success, #2d6a4f)'; }
-    showToast(`${result.assigned} section(s) assigned.`);
+    error.textContent = '';
+    button.disabled = true;
+    button.textContent = 'Creating…';
+    const result = await apiPost('api/admin_create_teacher.php', payload);
+    button.disabled = false;
+    button.textContent = 'Create Account';
+    if (result.error) { error.textContent = result.error; return; }
+    closeCreateTeacherModal();
+    showToast('Teacher account created. The teacher must change the temporary password at first sign-in.');
+    loadTeachers();
 }
 
 function escHtml(s) {
@@ -1990,7 +2234,23 @@ async function updateFilterDependents() {
 // ============================================================
 // AUTO-INIT
 // ============================================================
+function applyBootstrapFormClasses(root) {
+    const controls = 'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]), select, textarea';
+    if (root instanceof Element && root.matches(controls)) root.classList.add(root.tagName === 'SELECT' ? 'form-select' : 'form-control');
+    if (root instanceof Element && root.matches('input[type="checkbox"], input[type="radio"]')) root.classList.add('form-check-input');
+    root.querySelectorAll?.(controls).forEach(el => el.classList.add(el.tagName === 'SELECT' ? 'form-select' : 'form-control'));
+    root.querySelectorAll?.('input[type="checkbox"], input[type="radio"]').forEach(el => el.classList.add('form-check-input'));
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    applyBootstrapFormClasses(document);
+    const bootstrapControlsObserver = new MutationObserver(records => {
+        records.forEach(record => record.addedNodes.forEach(node => {
+            if (node.nodeType === Node.ELEMENT_NODE) applyBootstrapFormClasses(node);
+        }));
+    });
+    bootstrapControlsObserver.observe(document.body, { childList: true, subtree: true });
+
     if (document.getElementById('panel-analytics')) {
         // f_sy / f_grade / f_subject have NO inline onchange — handled here so that
         // updateFilterDependents() always runs before refreshDashboard(), keeping the
@@ -2005,120 +2265,74 @@ document.addEventListener('DOMContentLoaded', () => {
         updateFilterDependents().then(() => showDashboardEmptyState());
     }
 
-    // Teacher dashboard: "+ New" button opens the select-assessment panel
-    const btnNew = document.getElementById('btnNewAssessment');
-    if (btnNew) {
-        btnNew.addEventListener('click', () => openSelectAsmtPanel());
-    }
 });
 
 // ============================================================
-// TEACHER: SELECT SHARED ASSESSMENT
+// TEACHER: START OR CONTINUE SHARED ASSESSMENT
 // ============================================================
 
-let _sharedAsmts = [];   // cached from API
-
-async function openSelectAsmtPanel() {
-    document.getElementById('assessmentDetail').style.display = 'none';
-    document.getElementById('emptyState').style.display = 'none';
-    document.getElementById('newAssessmentPanel').style.display = 'block';
-
-    clearAsmtSelection();
-    const list = document.getElementById('selectAsmtList');
-    list.innerHTML = '<p class="text-muted">Loading…</p>';
-
-    const data = await apiGet('api/get_shared_assessments.php');
-    if (data.error) { list.innerHTML = `<p class="alert alert-warning">${escHtml(data.error)}</p>`; return; }
-
-    _sharedAsmts = data.assessments || [];
-    if (!_sharedAsmts.length) {
-        list.innerHTML = '<p class="text-muted">No assessments available yet. Ask your administrator to create assessments for your subjects.</p>';
-        return;
+async function startSharedAssessment(id, subjectId, button) {
+    const errorEl = button?.closest('td')?.querySelector('.assessment-start-error');
+    if (button) {
+        button.disabled = true;
+        button.dataset.actionTitle = button.title;
+        button.title = 'Starting…';
+        button.setAttribute('aria-label', 'Starting…');
     }
-    list.innerHTML = _sharedAsmts.map(a => `
-        <div class="select-asmt-card ${a.already_encoding ? 'active' : ''}" id="saCard${a.id}" onclick="selectSharedAsmt(${a.id})">
-            <div class="select-asmt-card-title">${escHtml(a.title)}</div>
-            <div class="select-asmt-card-meta">
-                ${escHtml(a.subject_name)} G${a.grade_level} &middot; Term ${a.term_no} &middot;
-                ${a.total_items} items &middot; SY ${escHtml(a.sy_name)}
-            </div>
-            ${a.already_encoding ? '<div class="select-asmt-card-badge">✓ Already encoding</div>' : ''}
-        </div>`).join('');
-}
+    if (errorEl) errorEl.textContent = '';
+    try {
+        const data = await apiGet(`api/get_sections.php?subject_id=${subjectId}&assessment_id=${id}`);
+        if (data.error) throw new Error(data.error);
+        if (!data.sections?.length) {
+            throw new Error('No sections are assigned to you for this subject and school year. Ask your administrator to assign your sections.');
+        }
 
-async function selectSharedAsmt(id) {
-    selectedSharedAsmtId = id;
-    document.querySelectorAll('.select-asmt-card').forEach(c => c.classList.remove('active'));
-    document.getElementById('saCard' + id)?.classList.add('active');
+        // Reuse this assessment's existing section set when continuing. For a
+        // first start, get_sections returns the teacher's assigned sections as
+        // the default checked set.
+        const available = new Set(data.sections.map(section => Number(section.id)));
+        let sectionIds = (data.checked || []).map(Number).filter(sectionId => available.has(sectionId));
+        if (!sectionIds.length) sectionIds = [...available];
 
-    const asmt = _sharedAsmts.find(a => a.id == id);
-    if (!asmt) return;
-
-    document.getElementById('selectAsmtName').textContent = asmt.title;
-
-    // Load teacher's sections for this assessment's subject
-    const checklist = document.getElementById('selectSectionChecklist');
-    checklist.innerHTML = '<p class="text-muted">Loading sections…</p>';
-    document.getElementById('selectAsmtSections').style.display = 'block';
-
-    const data = await apiGet(`api/get_sections.php?subject_id=${asmt.subject_id}&assessment_id=${id}`);
-    if (data.error || !data.sections?.length) {
-        checklist.innerHTML = '<p class="alert alert-warning">No sections found for your assignment. Contact admin.</p>';
-        return;
-    }
-
-    const preChecked = new Set(data.checked || []);
-    checklist.innerHTML = data.sections.map(s =>
-        `<label class="check-item"><input type="checkbox" name="sel_sec" value="${s.id}"${preChecked.has(s.id) ? ' checked' : ''}>${escHtml(s.name)}</label>`
-    ).join('');
-}
-
-function clearAsmtSelection() {
-    selectedSharedAsmtId = null;
-    document.getElementById('selectAsmtSections').style.display = 'none';
-    document.getElementById('selectSectionChecklist').innerHTML = '';
-}
-
-async function startEncoding(confirmRemoveWithData) {
-    if (!selectedSharedAsmtId) return;
-    const checked = [...document.querySelectorAll('#selectSectionChecklist input:checked')].map(cb => +cb.value);
-    if (!checked.length) { showToast('Select at least one section.', 'error'); return; }
-
-    const r = await apiPost('api/start_encoding.php', {
-        assessment_id: selectedSharedAsmtId,
-        section_ids:   checked,
-        confirm_remove_with_data: !!confirmRemoveWithData,
-    });
-    if (r.error) { showToast(r.error, 'error'); return; }
-
-    // Shared with another teacher's already-active encoding -- can NEVER be
-    // removed from here, no matter how many times you confirm. Re-check those
-    // boxes so the UI matches reality (and so retrying doesn't just ask again).
-    if (r.blocked_shared?.length) {
-        const names = r.blocked_shared.map(s => s.name).join(', ');
-        r.blocked_shared.forEach(s => {
-            const cb = document.querySelector(`#selectSectionChecklist input[value="${s.id}"]`);
-            if (cb) cb.checked = true;
+        const result = await apiPost('api/start_encoding.php', {
+            assessment_id: Number(id),
+            section_ids: sectionIds,
+            confirm_remove_with_data: false,
         });
-        alert(`${names} ${r.blocked_shared.length > 1 ? 'are' : 'is'} also being encoded by another teacher who already `
-            + `submitted this assessment, so ${r.blocked_shared.length > 1 ? 'they' : 'it'} can't be removed here. `
-            + `Left checked. Ask your admin if this needs to change.`);
-    }
+        if (result.error) throw new Error(result.error);
 
-    if (r.blocked_data?.length) {
-        const names = r.blocked_data.map(s => s.name).join(', ');
-        const msg = `${names} already ${r.blocked_data.length > 1 ? 'have' : 'has'} scores entered for this assessment. `
-            + `Unchecking ${r.blocked_data.length > 1 ? 'them' : 'it'} will permanently delete that data. Continue?`;
-        if (confirm(msg)) { startEncoding(true); return; }
-        showToast('Kept sections with existing data unchanged.', 'error');
-        return;
+        const status = document.getElementById(`assessmentStatus${id}`);
+        if (status) {
+            status.textContent = 'Draft';
+            status.className = 'status-chip badge status-draft';
+        }
+        const row = button?.closest('tr');
+        row?.querySelectorAll('.teacher-assessment-open').forEach(link => { link.onclick = () => loadAssessment(Number(id)); });
+        const rowAction = row?.querySelector('.assessment-row-action');
+        if (rowAction) {
+            rowAction.disabled = false;
+            rowAction.title = 'Open Assessment';
+            rowAction.setAttribute('aria-label', 'Open Assessment');
+            rowAction.dataset.actionTitle = 'Open Assessment';
+            const icon = rowAction.querySelector('i');
+            if (icon) icon.className = 'bi bi-box-arrow-up-right';
+            rowAction.classList.remove('assessment-row-action');
+            rowAction.onclick = () => loadAssessment(Number(id));
+        }
+        await loadAssessment(Number(id));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to start this assessment.';
+        if (errorEl) errorEl.textContent = message;
+        else showToast(message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            if (button.dataset.actionTitle) {
+                button.title = button.dataset.actionTitle;
+                button.setAttribute('aria-label', button.dataset.actionTitle);
+            }
+        }
     }
-
-    showToast(`Sections updated — ${r.sections} section(s) ready.`);
-    setTimeout(() => {
-        loadAssessment(selectedSharedAsmtId);
-        document.getElementById('newAssessmentPanel').style.display = 'none';
-    }, 600);
 }
 
 // ============================================================
@@ -2131,8 +2345,14 @@ async function loadCompetencies() {
     const wrap      = document.getElementById('compTableWrap');
     const emptyMsg  = document.getElementById('compEmptyMsg');
     const tbody     = document.getElementById('compTbody');
+    const setMetric = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+    const subjectOption = document.getElementById('compSubjectFilter')?.selectedOptions?.[0];
+    const termOption = document.getElementById('compTermFilter')?.selectedOptions?.[0];
+    setMetric('competencyMetricSubject', subjectOption?.value ? subjectOption.textContent.trim() : 'Select subject');
+    setMetric('competencyMetricTerm', termId ? (termOption?.textContent.trim() || 'Selected term') : 'All terms');
 
     if (!subjectId) {
+        setMetric('competencyMetricCount', '—');
         wrap.style.display = 'none';
         emptyMsg.style.display = '';
         emptyMsg.textContent = 'Select a subject above to view or add competencies.';
@@ -2149,6 +2369,7 @@ async function loadCompetencies() {
     if (data.error) { emptyMsg.textContent = data.error; return; }
 
     const rows = data.competencies || [];
+    setMetric('competencyMetricCount', String(rows.length));
     if (!rows.length) {
         emptyMsg.style.display = '';
         emptyMsg.textContent   = 'No competencies found for this filter. Add one below.';
@@ -2165,7 +2386,7 @@ async function loadCompetencies() {
             <td><span id="ccode${c.id}">${escHtml(c.code || '—')}</span></td>
             <td><span id="cdesc${c.id}">${escHtml(c.description)}</span></td>
             <td style="text-align:right">
-                <button class="btn btn-sm btn-outline" onclick="adminEditCompetency(${c.id},'${escHtml(c.code || '')}','${escHtml(c.description).replace(/'/g,"\\'")}')">Edit</button>
+                <button class="btn btn-sm btn-outline-secondary" onclick="adminEditCompetency(${c.id},'${escHtml(c.code || '')}','${escHtml(c.description).replace(/'/g,"\\'")}')">Edit</button>
                 <button class="btn btn-sm btn-danger"  onclick="adminDeleteCompetency(${c.id})">Del</button>
             </td>
         </tr>`).join('');
@@ -2281,6 +2502,7 @@ let _createStep       = 1;
 let _createAsmtType   = '';
 let _createCompetencies = [];  // competencies loaded for step 3
 let _itemCompMap      = {};    // item_no → competency_id
+let _duplicateItemCompMap = {};
 
 function openCreateAsmtModal() {
     _createStep     = 1;
@@ -2463,7 +2685,7 @@ function renderReviewStep() {
     const typeLabel  = { summative: 'Summative Test', term_exam: 'Term Exam', periodic: 'Periodic' }[type] || type;
 
     document.getElementById('asmtReviewContent').innerHTML = `
-        <table class="data-table" style="font-size:.9rem">
+        <table class="data-table table align-middle" style="font-size:.9rem">
             <tr><th>Type</th><td>${escHtml(typeLabel)}</td></tr>
             <tr><th>Total Items</th><td>${escHtml(totalItems)}</td></tr>
             <tr><th>Subject</th><td>${escHtml(subjectTxt)}</td></tr>
@@ -2500,6 +2722,64 @@ async function doCreateAssessment() {
     if (r.error) { errEl.textContent = r.error; return; }
     showToast(`Assessment created (ID #${r.assessment_id}). Teachers can now select it.`);
     closeCreateAsmtModal();
+}
+
+async function openDuplicateAsmtModal(id) {
+    const error = document.getElementById('duplicateAsmtError');
+    error.textContent = '';
+    document.getElementById('duplicateSourceLabel').textContent = 'Loading source assessment…';
+    document.getElementById('duplicateAsmtModal').style.display = '';
+    const data = await apiGet(`api/get_admin_assessment.php?id=${id}`);
+    if (data.error) { error.textContent = data.error; return; }
+    const a = data.assessment;
+    _duplicateItemCompMap = {};
+    Object.entries(data.competency_map || {}).forEach(([item, value]) => {
+        _duplicateItemCompMap[+item] = +value.competency_id;
+    });
+    document.getElementById('duplicateSourceLabel').textContent = `Copying “${a.title}” · ${a.subject_name} · Term ${a.term_no}`;
+    document.getElementById('dupType').value = a.type;
+    document.getElementById('dupItems').value = a.total_items;
+    document.getElementById('dupTitle').value = `${a.title} (Copy)`;
+    document.getElementById('dupDate').value = a.date_given || '';
+    const subject = document.getElementById('dupSubject');
+    subject.innerHTML = SUBJECTS_ALL.map(s => `<option value="${s.id}">${escHtml(s.name)} (Grade ${s.grade_level})</option>`).join('');
+    subject.value = a.subject_id;
+    const term = document.getElementById('dupTerm');
+    term.innerHTML = ALL_TERMS.map(t => `<option value="${t.id}">${escHtml(t.label)}</option>`).join('');
+    term.value = a.term_id;
+}
+
+function closeDuplicateAsmtModal() {
+    document.getElementById('duplicateAsmtModal').style.display = 'none';
+}
+
+async function saveDuplicatedAssessment() {
+    const error = document.getElementById('duplicateAsmtError');
+    const button = document.getElementById('btnDuplicateAsmt');
+    const totalItems = +document.getElementById('dupItems').value;
+    const itemMap = {};
+    Object.entries(_duplicateItemCompMap).forEach(([item, competency]) => {
+        if (+item <= totalItems) itemMap[item] = competency;
+    });
+    const payload = {
+        type: document.getElementById('dupType').value,
+        total_items: totalItems,
+        subject_id: +document.getElementById('dupSubject').value,
+        term_id: +document.getElementById('dupTerm').value,
+        title: document.getElementById('dupTitle').value.trim(),
+        date_given: document.getElementById('dupDate').value || null,
+        item_competency_map: itemMap,
+    };
+    error.textContent = '';
+    button.disabled = true;
+    button.textContent = 'Creating…';
+    const result = await apiPost('api/create_admin_assessment.php', payload);
+    button.disabled = false;
+    button.textContent = 'Create Duplicate';
+    if (result.error) { error.textContent = result.error; return; }
+    closeDuplicateAsmtModal();
+    showToast(`Assessment duplicated (ID #${result.assessment_id}).`);
+    loadAdminAssessments();
 }
 
 // ============================================================
@@ -2549,7 +2829,7 @@ function renderCompetencySection(data) {
     const chartData = rows.slice(0, 10);
     const labels  = chartData.map(r => r.code || r.description.substring(0, 30) + '…');
     const values  = chartData.map(r => +r.pct);
-    const colors  = values.map(v => v < 50 ? '#e55934' : v < 75 ? '#f0a500' : '#2d6a4f');
+    const colors  = values.map(masteryColor);
 
     renderChart('chartCompetency', {
         type: 'bar',
@@ -2600,7 +2880,7 @@ function renderCompetencySection(data) {
 
     // Drill-down table
     drillEl.innerHTML = `
-        <table class="data-table comp-drill-table">
+        <table class="data-table table align-middle comp-drill-table">
             <colgroup>
                 <col class="col-code">
                 <col class="col-desc">
@@ -2638,6 +2918,7 @@ function renderCompetencySection(data) {
 // ============================================================
 
 let _adminAssessments = [];   // cache for delete blast radius lookup
+let _adminAssessmentsTable = null;
 let _editAsmtId       = null;
 let _editHasData      = false;
 let _editTotalItems   = 0;
@@ -2686,37 +2967,72 @@ async function loadAdminAssessments() {
     if (data.error) {
         document.getElementById('asmtListEmpty').style.display = '';
         document.getElementById('asmtListEmpty').textContent   = data.error;
+        _adminAssessmentsTable?.setData([]);
+        updateAssessmentMetrics([]);
         return;
     }
 
     _adminAssessments = data.assessments || [];
+    updateAssessmentMetrics(_adminAssessments);
 
     if (!_adminAssessments.length) {
         document.getElementById('asmtListEmpty').style.display = '';
         return;
     }
 
-    const tbody = document.getElementById('asmtListTbody');
-    const typeLabel = { summative: 'Summative', term_exam: 'Term Exam' };
-
-    tbody.innerHTML = _adminAssessments.map(a => `
-        <tr id="asmtRow${a.id}">
-            <td>${escHtml(a.title)}</td>
-            <td>${typeLabel[a.type] || escHtml(a.type)}</td>
-            <td>${escHtml(a.subject_name)} <small class="text-muted">G${a.grade_level}</small></td>
-            <td>Term ${a.term_no}</td>
-            <td style="text-align:right">${a.total_items}</td>
-            <td>${a.date_given || '—'}</td>
-            <td style="text-align:right">${a.sections_encoded}</td>
-            <td style="text-align:right">${a.teachers_encoded}</td>
-            <td><span class="status-chip status-${a.status}">${escHtml(a.status)}</span></td>
-            <td class="asmt-actions-cell">
-                <button class="btn btn-sm btn-outline" onclick="openEditAsmtModal(${a.id})">Edit</button>
-                <button class="btn btn-sm btn-danger"  onclick="openDeleteAsmtModal(${a.id})">Delete</button>
-            </td>
-        </tr>`).join('');
-
     document.getElementById('asmtListWrap').style.display = '';
+    const tableData = _adminAssessments.map(a => ({
+        ...a,
+        type_label: ({ summative: 'Summative', periodic: 'Periodic', term_exam: 'Term Exam' })[a.type] || a.type,
+        subject_label: `${a.subject_name} G${a.grade_level}`,
+        term_label: `Term ${a.term_no}`,
+        date_label: a.date_given || '—',
+        status_html: `<span class="status-chip badge status-${escHtml(a.status)}">${escHtml(a.status)}</span>`,
+        actions_html: `<div class="tabulator-actions"><a class="btn btn-sm btn-outline-primary" href="${BASE_URL}api/download_answer_sheet.php?assessment_id=${encodeURIComponent(+a.id)}">Answer Sheet</a><button class="btn btn-sm btn-outline-secondary" onclick="openDuplicateAsmtModal(${+a.id})">Duplicate</button><button class="btn btn-sm btn-outline-secondary" onclick="openEditAsmtModal(${+a.id})">Edit</button><button class="btn btn-sm btn-danger" onclick="openDeleteAsmtModal(${+a.id})">Delete</button></div>`,
+    }));
+
+    if (!_adminAssessmentsTable) {
+        _adminAssessmentsTable = new Tabulator('#asmtListTable', {
+            data: tableData,
+            layout: 'fitColumns',
+            responsiveLayout: 'collapse',
+            responsiveLayoutCollapseStartOpen: false,
+            pagination: 'local',
+            paginationSize: 15,
+            paginationSizeSelector: [10, 15, 25, 50],
+            paginationCounter: 'rows',
+            placeholder: 'No assessments match these filters.',
+            columns: [
+                { formatter: 'responsiveCollapse', width: 34, minWidth: 34, hozAlign: 'center', headerSort: false, resizable: false, responsive: 0 },
+                { title: 'Title', field: 'title', minWidth: 150, widthGrow: 2, responsive: 0 },
+                { title: 'Type', field: 'type_label', minWidth: 96, responsive: 4 },
+                { title: 'Subject', field: 'subject_label', minWidth: 135, responsive: 2 },
+                { title: 'Term', field: 'term_label', minWidth: 78, responsive: 5 },
+                { title: 'Items', field: 'total_items', minWidth: 58, hozAlign: 'right', responsive: 6 },
+                { title: 'Date Given', field: 'date_label', minWidth: 100, responsive: 7 },
+                { title: 'Sections', field: 'sections_encoded', minWidth: 72, hozAlign: 'right', responsive: 8 },
+                { title: 'Teachers', field: 'teachers_encoded', minWidth: 76, hozAlign: 'right', responsive: 9 },
+                { title: 'Status', field: 'status_html', formatter: 'html', minWidth: 88, responsive: 3 },
+                { title: 'Actions', field: 'actions_html', formatter: 'html', minWidth: 150, widthGrow: 1, responsive: 1, headerSort: false },
+            ],
+        });
+    } else {
+        _adminAssessmentsTable.setData(tableData);
+    }
+}
+
+function updateAssessmentMetrics(assessments) {
+    const total = (key) => assessments.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+    const values = {
+        assessmentMetricCount: assessments.length,
+        assessmentMetricItems: total('total_items'),
+        assessmentMetricSections: total('sections_encoded'),
+        assessmentMetricTeachers: total('teachers_encoded'),
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(value);
+    });
 }
 
 // ============================================================
@@ -2966,7 +3282,7 @@ async function confirmDeleteAsmtById() {
     if (r.error) { errEl.textContent = r.error; return; }
 
     showToast('Assessment deleted.');
-    document.getElementById('asmtRow' + _deleteAsmtId)?.remove();
+    loadAdminAssessments();
     closeDeleteAsmtModal();
     refreshDashboard();
 }
