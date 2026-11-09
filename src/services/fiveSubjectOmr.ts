@@ -112,7 +112,12 @@ function trackLine(image: ImageData, axis: "x" | "y", expected: number, start: n
   return strength >= 0.24 ? best : null;
 }
 
-/** Track the printed outline of each subject on the page-rectified image. */
+/**
+ * Track each subject's own printed rectangle after the page has been rectified.
+ * The local horizontal/vertical rules are the reliable geometry here; searching
+ * for dark pixels at each expected corner can instead snap to page registration
+ * marks, answer ink, or other nearby print and make every box look like the page.
+ */
 export function trackFourSubjectBoxes(rectified: HTMLCanvasElement): Corners[] {
   const ctx = rectified.getContext("2d", { willReadFrequently: true });
   if (!ctx) return FOUR_SUBJECT_REFERENCE_BOXES;
@@ -120,16 +125,13 @@ export function trackFourSubjectBoxes(rectified: HTMLCanvasElement): Corners[] {
   const scale = OUTPUT_SCALE;
   return FOUR_SUBJECT_REFERENCE_BOXES.map((reference) => {
     const [topLeft, topRight, bottomRight, bottomLeft] = reference;
-    const controlPoints = [topLeft, topRight, bottomRight, bottomLeft].map((point) =>
-      trackControlPoint(image, { x: point.x * scale, y: point.y * scale }),
-    );
-    if (controlPoints.every((point): point is Point => point !== null)) {
-      return controlPoints.map((point) => ({ x: point.x / scale, y: point.y / scale })) as Corners;
-    }
     const left = topLeft.x * scale;
     const right = topRight.x * scale;
     const top = topLeft.y * scale;
     const bottom = bottomLeft.y * scale;
+
+    // Find the four vertical and four horizontal edge positions by following
+    // each box edge over a segment that does not contain bubbles or barcodes.
     const leftTopX = trackLine(image, "x", left, top + 12, top + 100);
     const rightTopX = trackLine(image, "x", right, top + 12, top + 100);
     const leftBottomX = trackLine(image, "x", left, bottom - 100, bottom - 12);
@@ -138,15 +140,21 @@ export function trackFourSubjectBoxes(rectified: HTMLCanvasElement): Corners[] {
     const topRightY = trackLine(image, "y", top, right - 100, right - 12);
     const bottomLeftY = trackLine(image, "y", bottom, left + 12, left + 100);
     const bottomRightY = trackLine(image, "y", bottom, right - 100, right - 12);
-    if ([leftTopX, rightTopX, leftBottomX, rightBottomX, topLeftY, topRightY, bottomLeftY, bottomRightY].some((value) => value === null)) {
-      return reference;
-    }
-    return [
+    const edges = [leftTopX, rightTopX, leftBottomX, rightBottomX, topLeftY, topRightY, bottomLeftY, bottomRightY];
+    if (edges.some((value) => value === null)) return reference;
+
+    const tracked: Corners = [
       { x: leftTopX! / scale, y: topLeftY! / scale },
       { x: rightTopX! / scale, y: topRightY! / scale },
       { x: rightBottomX! / scale, y: bottomRightY! / scale },
       { x: leftBottomX! / scale, y: bottomLeftY! / scale },
-    ] as Corners;
+    ];
+    // Reject accidental matches to unrelated lines; preserve the template box
+    // rather than returning a collapsed or inverted subject quadrilateral.
+    if (tracked[1].x - tracked[0].x < 400 || tracked[3].x >= tracked[2].x || tracked[3].y <= tracked[0].y) {
+      return reference;
+    }
+    return tracked;
   });
 }
 
@@ -281,7 +289,7 @@ export function readFourSubjectAnswers(rectified: HTMLCanvasElement, subjectBoxe
       if (marked.length > 1) return { choice: null, status: "multiple" as const, confidence: 0.15 };
       if (marked.length === 1 && sorted[0] - sorted[1] > 0.1) {
         return {
-          choice: (['A', 'B', 'C', 'D'] as const)[marked[0].i],
+          choice: (["A", "B", "C", "D"] as const)[marked[0].i],
           status: "marked" as const,
           confidence: Math.min(0.99, 0.6 + (sorted[0] - sorted[1]) * 0.45),
         };
