@@ -44,9 +44,7 @@ export function findSheetCorners(image: ImageData): Corners | null {
   const corners = detectCorners(image);
   if (!corners) return null;
 
-  // Validate the page warp against the actual subject-box geometry. If the auto
-  // detector snapped to the sheet's outer page edges instead of the four subject
-  // boxes, this will reject it and let the UI fall back to manual corner reset.
+  // Validate the coarse page warp against the expected four subject columns.
   try {
     const width = Math.round(TEMPLATE_WIDTH * OUTPUT_SCALE);
     const height = Math.round(TEMPLATE_HEIGHT * OUTPUT_SCALE);
@@ -55,20 +53,16 @@ export function findSheetCorners(image: ImageData): Corners | null {
     output.height = height;
     const ctx = output.getContext("2d", { willReadFrequently: true });
     if (!ctx) return corners;
-
     const projectPoint = project(FOUR_SUBJECT_REFERENCE_CORNERS, corners);
     const rectified = ctx.createImageData(width, height);
     for (let y = 0; y < height; y++) {
-      const templateY = y / OUTPUT_SCALE;
       for (let x = 0; x < width; x++) {
-        const p = projectPoint({ x: x / OUTPUT_SCALE, y: templateY });
+        const p = projectPoint({ x: x / OUTPUT_SCALE, y: y / OUTPUT_SCALE });
         const sx = Math.round(p.x);
         const sy = Math.round(p.y);
         const dest = (y * width + x) * 4;
         if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) {
-          rectified.data[dest] = 255;
-          rectified.data[dest + 1] = 255;
-          rectified.data[dest + 2] = 255;
+          rectified.data[dest] = rectified.data[dest + 1] = rectified.data[dest + 2] = 255;
           rectified.data[dest + 3] = 255;
           continue;
         }
@@ -80,13 +74,12 @@ export function findSheetCorners(image: ImageData): Corners | null {
       }
     }
     ctx.putImageData(rectified, 0, 0);
-    const trackedBoxes = trackFourSubjectBoxes(output);
-    const valid = trackedBoxes.every((box) => {
+    const boxes = trackFourSubjectBoxes(output);
+    return boxes.every((box) => {
       const boxWidth = Math.hypot(box[1].x - box[0].x, box[1].y - box[0].y);
       const boxHeight = Math.hypot(box[3].x - box[0].x, box[3].y - box[0].y);
       return boxWidth > 400 && boxWidth < 700 && boxHeight > 2500 && boxHeight < 3300;
-    });
-    return valid ? corners : null;
+    }) ? corners : null;
   } catch {
     return null;
   }
@@ -97,10 +90,7 @@ export function mapFourSubjectTemplate(corners: Corners): (point: Point) => Poin
   return project(FOUR_SUBJECT_REFERENCE_CORNERS, corners);
 }
 
-export function rectifyFourSubjectSheet(
-  source: ImageData,
-  corners: Corners,
-): HTMLCanvasElement {
+export function rectifyFourSubjectSheet(source: ImageData, corners: Corners): HTMLCanvasElement {
   const width = Math.round(TEMPLATE_WIDTH * OUTPUT_SCALE);
   const height = Math.round(TEMPLATE_HEIGHT * OUTPUT_SCALE);
   const projectPoint = mapFourSubjectTemplate(corners);
@@ -111,16 +101,13 @@ export function rectifyFourSubjectSheet(
   if (!ctx) throw new Error("This browser cannot process the answer sheet image.");
   const rectified = ctx.createImageData(width, height);
   for (let y = 0; y < height; y++) {
-    const templateY = y / OUTPUT_SCALE;
     for (let x = 0; x < width; x++) {
-      const p = projectPoint({ x: x / OUTPUT_SCALE, y: templateY });
+      const p = projectPoint({ x: x / OUTPUT_SCALE, y: y / OUTPUT_SCALE });
       const sx = Math.round(p.x);
       const sy = Math.round(p.y);
       const dest = (y * width + x) * 4;
       if (sx < 0 || sy < 0 || sx >= source.width || sy >= source.height) {
-        rectified.data[dest] = 255;
-        rectified.data[dest + 1] = 255;
-        rectified.data[dest + 2] = 255;
+        rectified.data[dest] = rectified.data[dest + 1] = rectified.data[dest + 2] = 255;
         rectified.data[dest + 3] = 255;
         continue;
       }
@@ -135,6 +122,34 @@ export function rectifyFourSubjectSheet(
   return output;
 }
 
+function grayAt(data: ImageData, x: number, y: number): number {
+  if (x < 0 || y < 0 || x >= data.width || y >= data.height) return 255;
+  const index = (y * data.width + x) * 4;
+  return data.data[index] * 0.299 + data.data[index + 1] * 0.587 + data.data[index + 2] * 0.114;
+}
+
+/** Find the center of the solid registration square at a subject-box corner. */
+function trackControlPoint(image: ImageData, expected: Point): Point | null {
+  let best: Point | null = null;
+  let bestScore = 0;
+  for (let dy = -8; dy <= 8; dy++) {
+    for (let dx = -8; dx <= 8; dx++) {
+      let dark = 0;
+      for (let py = -2; py <= 2; py++) {
+        for (let px = -2; px <= 2; px++) {
+          if (grayAt(image, Math.round(expected.x + dx + px), Math.round(expected.y + dy + py)) < 145) dark++;
+        }
+      }
+      const score = dark / 25 - Math.hypot(dx, dy) * 0.0005;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { x: expected.x + dx, y: expected.y + dy };
+      }
+    }
+  }
+  return bestScore >= 0.72 ? best : null;
+}
+
 function lineStrength(image: ImageData, axis: "x" | "y", fixed: number, start: number, end: number): number {
   let dark = 0;
   const length = Math.max(1, Math.floor(end) - Math.ceil(start) + 1);
@@ -142,9 +157,7 @@ function lineStrength(image: ImageData, axis: "x" | "y", fixed: number, start: n
     const x = Math.round(axis === "x" ? fixed : offset);
     const y = Math.round(axis === "y" ? fixed : offset);
     if (x < 0 || y < 0 || x >= image.width || y >= image.height) continue;
-    const index = (y * image.width + x) * 4;
-    const gray = image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114;
-    if (gray < 145) dark++;
+    if (grayAt(image, x, y) < 145) dark++;
   }
   return dark / length;
 }
@@ -161,10 +174,9 @@ function trackLine(image: ImageData, axis: "x" | "y", expected: number, start: n
 }
 
 /**
- * Track each subject's own printed rectangle after the page has been rectified.
- * The local horizontal/vertical rules are the reliable geometry here; searching
- * for dark pixels at each expected corner can instead snap to page registration
- * marks, answer ink, or other nearby print and make every box look like the page.
+ * Detect the 16 subject-box registration marks (four per subject) independently.
+ * Page corners are only used for coarse rectification; these local square marks
+ * define the actual answer-grid alignment for each subject.
  */
 export function trackFourSubjectBoxes(rectified: HTMLCanvasElement): Corners[] {
   const ctx = rectified.getContext("2d", { willReadFrequently: true });
@@ -172,14 +184,20 @@ export function trackFourSubjectBoxes(rectified: HTMLCanvasElement): Corners[] {
   const image = ctx.getImageData(0, 0, rectified.width, rectified.height);
   const scale = OUTPUT_SCALE;
   return FOUR_SUBJECT_REFERENCE_BOXES.map((reference) => {
-    const [topLeft, topRight, bottomRight, bottomLeft] = reference;
+    const markers = reference.map((point) => trackControlPoint(image, { x: point.x * scale, y: point.y * scale }));
+    if (markers.every((point): point is Point => point !== null)) {
+      const localCorners = markers.map((point) => ({ x: point.x / scale, y: point.y / scale })) as Corners;
+      const width = Math.hypot(localCorners[1].x - localCorners[0].x, localCorners[1].y - localCorners[0].y);
+      const height = Math.hypot(localCorners[3].x - localCorners[0].x, localCorners[3].y - localCorners[0].y);
+      if (width > 400 && width < 700 && height > 2500 && height < 3300) return localCorners;
+    }
+
+    // Fallback for older/low-quality sheets without visible local squares.
+    const [topLeft, topRight, , bottomLeft] = reference;
     const left = topLeft.x * scale;
     const right = topRight.x * scale;
     const top = topLeft.y * scale;
     const bottom = bottomLeft.y * scale;
-
-    // Find the four vertical and four horizontal edge positions by following
-    // each box edge over a segment that does not contain bubbles or barcodes.
     const leftTopX = trackLine(image, "x", left, top + 12, top + 100);
     const rightTopX = trackLine(image, "x", right, top + 12, top + 100);
     const leftBottomX = trackLine(image, "x", left, bottom - 100, bottom - 12);
@@ -188,52 +206,21 @@ export function trackFourSubjectBoxes(rectified: HTMLCanvasElement): Corners[] {
     const topRightY = trackLine(image, "y", top, right - 100, right - 12);
     const bottomLeftY = trackLine(image, "y", bottom, left + 12, left + 100);
     const bottomRightY = trackLine(image, "y", bottom, right - 100, right - 12);
-    const edges = [leftTopX, rightTopX, leftBottomX, rightBottomX, topLeftY, topRightY, bottomLeftY, bottomRightY];
-    if (edges.some((value) => value === null)) return reference;
-
-    const tracked: Corners = [
+    if ([leftTopX, rightTopX, leftBottomX, rightBottomX, topLeftY, topRightY, bottomLeftY, bottomRightY].some((value) => value === null)) return reference;
+    return [
       { x: leftTopX! / scale, y: topLeftY! / scale },
       { x: rightTopX! / scale, y: topRightY! / scale },
       { x: rightBottomX! / scale, y: bottomRightY! / scale },
       { x: leftBottomX! / scale, y: bottomLeftY! / scale },
-    ];
-    // Reject accidental matches to unrelated lines; preserve the template box
-    // rather than returning a collapsed or inverted subject quadrilateral.
-    if (tracked[1].x - tracked[0].x < 400 || tracked[3].x >= tracked[2].x || tracked[3].y <= tracked[0].y) {
-      return reference;
-    }
-    return tracked;
+    ] as Corners;
   });
-}
-
-/** Find a printed filled square near an expected subject-box corner. */
-function trackControlPoint(image: ImageData, expected: Point): Point | null {
-  let best: Point | null = null;
-  let bestScore = 0;
-  for (let dy = -8; dy <= 8; dy++) {
-    for (let dx = -8; dx <= 8; dx++) {
-      let dark = 0;
-      for (let py = -2; py <= 2; py++) {
-        for (let px = -2; px <= 2; px++) {
-          if (grayAt(image, Math.round(expected.x + dx + px), Math.round(expected.y + dy + py)) < 145) dark++;
-        }
-      }
-      const score = dark / 25 - Math.hypot(dx, dy) * 0.0005;
-      if (score > bestScore) { bestScore = score; best = { x: expected.x + dx, y: expected.y + dy }; }
-    }
-  }
-  return bestScore >= 0.72 ? best : null;
 }
 
 function bubbleFill(data: ImageData, center: Point): number {
   let dark = 0;
   let total = 0;
-  // The printed A/B/C/D glyph fills the center of every bubble, including
-  // blank ones. Measure an interior ring outside that glyph and inside the
-  // printed circle so only pencil/pen fill contributes to the score.
   const innerRadius = 3.5;
   const outerRadius = 8;
-  const threshold = 170;
   for (let dy = -outerRadius; dy <= outerRadius; dy++) {
     for (let dx = -outerRadius; dx <= outerRadius; dx++) {
       const distanceSquared = dx * dx + dy * dy;
@@ -241,10 +228,8 @@ function bubbleFill(data: ImageData, center: Point): number {
       const x = Math.round(center.x + dx);
       const y = Math.round(center.y + dy);
       if (x < 0 || y < 0 || x >= data.width || y >= data.height) continue;
-      const index = (y * data.width + x) * 4;
-      const gray = data.data[index] * 0.299 + data.data[index + 1] * 0.587 + data.data[index + 2] * 0.114;
       total++;
-      if (gray < threshold) dark++;
+      if (grayAt(data, x, y) < 170) dark++;
     }
   }
   return total ? dark / total : 0;
@@ -255,22 +240,13 @@ export interface BubbleAnswer {
   status: "marked" | "blank" | "multiple" | "uncertain";
   confidence: number;
 }
-
 export type FourSubjectBubbleCenters = Point[][][];
 
 export function mapFourSubjectBubble(column: number, question: number, choice: number, subjectBoxes?: Corners[], trackedCenters?: FourSubjectBubbleCenters): Point {
   const measured = trackedCenters?.[column]?.[question]?.[choice];
   if (measured) return measured;
   const center = fourSubjectBubbleCenter(column, question, choice);
-  return subjectBoxes?.[column]
-    ? project(FOUR_SUBJECT_REFERENCE_BOXES[column], subjectBoxes[column])(center)
-    : center;
-}
-
-function grayAt(data: ImageData, x: number, y: number): number {
-  if (x < 0 || y < 0 || x >= data.width || y >= data.height) return 255;
-  const index = (y * data.width + x) * 4;
-  return data.data[index] * 0.299 + data.data[index + 1] * 0.587 + data.data[index + 2] * 0.114;
+  return subjectBoxes?.[column] ? project(FOUR_SUBJECT_REFERENCE_BOXES[column], subjectBoxes[column])(center) : center;
 }
 
 function locateBubbleCenter(image: ImageData, expected: Point): Point {
@@ -280,8 +256,6 @@ function locateBubbleCenter(image: ImageData, expected: Point): Point {
   const angles = Array.from({ length: 24 }, (_, i) => i * Math.PI / 12);
   let best = { x: cx, y: cy };
   let bestScore = -1;
-  // Match the printed circular outline rather than its center letter or a
-  // filled mark. This corrects small local shifts that remain after warping.
   for (let dy = -4; dy <= 4; dy++) {
     for (let dx = -4; dx <= 4; dx++) {
       const candidateX = cx + dx;
@@ -296,7 +270,6 @@ function locateBubbleCenter(image: ImageData, expected: Point): Point {
         }
         score += Math.max(0, strongest);
       }
-      // Prefer the expected location when two candidates match the ring equally.
       score -= Math.hypot(dx, dy) * 0.002;
       if (score > bestScore) { bestScore = score; best = { x: candidateX, y: candidateY }; }
     }
@@ -311,10 +284,9 @@ export function trackFourSubjectBubbleCenters(rectified: HTMLCanvasElement, subj
   return FOUR_SUBJECT_BUBBLE_COLUMNS.map((_, column) => {
     const box = subjectBoxes?.[column];
     const mapLocal = box ? project(FOUR_SUBJECT_REFERENCE_BOXES[column], box) : (point: Point) => point;
-    return Array.from({ length: 50 }, (_, question) => Array.from({ length: 4 }, (_, choice) => {
-      const expected = mapLocal(fourSubjectBubbleCenter(column, question, choice));
-      return locateBubbleCenter(image, expected);
-    }));
+    return Array.from({ length: 50 }, (_, question) => Array.from({ length: 4 }, (_, choice) =>
+      locateBubbleCenter(image, mapLocal(fourSubjectBubbleCenter(column, question, choice))),
+    ));
   });
 }
 
@@ -327,8 +299,7 @@ export function readFourSubjectAnswers(rectified: HTMLCanvasElement, subjectBoxe
     const mapLocal = box ? project(FOUR_SUBJECT_REFERENCE_BOXES[column], box) : (point: Point) => point;
     return Array.from({ length: 50 }, (_, itemIndex) => {
       const scores = [0, 1, 2, 3].map((choice) => {
-        const center = fourSubjectBubbleCenter(column, itemIndex, choice);
-        const tracked = mapLocal(center);
+        const tracked = mapLocal(fourSubjectBubbleCenter(column, itemIndex, choice));
         const measured = trackedCenters?.[column]?.[itemIndex]?.[choice] ?? tracked;
         return bubbleFill(image, { x: measured.x * OUTPUT_SCALE, y: measured.y * OUTPUT_SCALE });
       });
@@ -336,11 +307,7 @@ export function readFourSubjectAnswers(rectified: HTMLCanvasElement, subjectBoxe
       const sorted = [...scores].sort((a, b) => b - a);
       if (marked.length > 1) return { choice: null, status: "multiple" as const, confidence: 0.15 };
       if (marked.length === 1 && sorted[0] - sorted[1] > 0.1) {
-        return {
-          choice: (["A", "B", "C", "D"] as const)[marked[0].i],
-          status: "marked" as const,
-          confidence: Math.min(0.99, 0.6 + (sorted[0] - sorted[1]) * 0.45),
-        };
+        return { choice: (["A", "B", "C", "D"] as const)[marked[0].i], status: "marked" as const, confidence: Math.min(0.99, 0.6 + (sorted[0] - sorted[1]) * 0.45) };
       }
       if (sorted[0] > 0.12) return { choice: null, status: "uncertain" as const, confidence: 0.2 };
       return { choice: null, status: "blank" as const, confidence: 0.65 };
@@ -350,7 +317,6 @@ export function readFourSubjectAnswers(rectified: HTMLCanvasElement, subjectBoxe
 
 export const studentAssessmentBarcodeRegion = { x: 1640, y: 145, width: 750, height: 105 };
 export function subjectBarcodeRegion(column: number) {
-  // Keep the crop clear of the first answer-bubble row below the barcode.
   return { x: 135 + column * 580, y: 295, width: 525, height: 50 };
 }
 
