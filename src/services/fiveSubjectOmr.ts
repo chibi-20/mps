@@ -41,7 +41,55 @@ export function fourSubjectBubbleCenter(column: number, question: number, choice
 }
 
 export function findSheetCorners(image: ImageData): Corners | null {
-  return detectCorners(image);
+  const corners = detectCorners(image);
+  if (!corners) return null;
+
+  // Validate the page warp against the actual subject-box geometry. If the auto
+  // detector snapped to the sheet's outer page edges instead of the four subject
+  // boxes, this will reject it and let the UI fall back to manual corner reset.
+  try {
+    const width = Math.round(TEMPLATE_WIDTH * OUTPUT_SCALE);
+    const height = Math.round(TEMPLATE_HEIGHT * OUTPUT_SCALE);
+    const output = document.createElement("canvas");
+    output.width = width;
+    output.height = height;
+    const ctx = output.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return corners;
+
+    const projectPoint = project(FOUR_SUBJECT_REFERENCE_CORNERS, corners);
+    const rectified = ctx.createImageData(width, height);
+    for (let y = 0; y < height; y++) {
+      const templateY = y / OUTPUT_SCALE;
+      for (let x = 0; x < width; x++) {
+        const p = projectPoint({ x: x / OUTPUT_SCALE, y: templateY });
+        const sx = Math.round(p.x);
+        const sy = Math.round(p.y);
+        const dest = (y * width + x) * 4;
+        if (sx < 0 || sy < 0 || sx >= image.width || sy >= image.height) {
+          rectified.data[dest] = 255;
+          rectified.data[dest + 1] = 255;
+          rectified.data[dest + 2] = 255;
+          rectified.data[dest + 3] = 255;
+          continue;
+        }
+        const src = (sy * image.width + sx) * 4;
+        rectified.data[dest] = image.data[src];
+        rectified.data[dest + 1] = image.data[src + 1];
+        rectified.data[dest + 2] = image.data[src + 2];
+        rectified.data[dest + 3] = 255;
+      }
+    }
+    ctx.putImageData(rectified, 0, 0);
+    const trackedBoxes = trackFourSubjectBoxes(output);
+    const valid = trackedBoxes.every((box) => {
+      const boxWidth = Math.hypot(box[1].x - box[0].x, box[1].y - box[0].y);
+      const boxHeight = Math.hypot(box[3].x - box[0].x, box[3].y - box[0].y);
+      return boxWidth > 400 && boxWidth < 700 && boxHeight > 2500 && boxHeight < 3300;
+    });
+    return valid ? corners : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Maps template-space coordinates directly to pixel coordinates in a photo. */
